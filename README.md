@@ -24,17 +24,24 @@ Give it a `spec.md` file and it does everything:
 
 `WAITING_FOR_REVIEW` on App Store Connect.
 
-## Requirements
+## Prerequisites
 
-- macOS with Xcode 16+
-- Apple Developer account
-- RevenueCat account
-- Fastlane configured (`Fastfile` with `API_KEY_ID`, `API_ISSUER_ID`, `API_KEY_PATH`)
-- ASC CLI (`asc` — [App Store Connect CLI](https://github.com/nickvdyck/asc))
-- Greenlight (`greenlight` — [RevylAI/greenlight](https://github.com/RevylAI/greenlight))
-- SnapAI + OpenAI API key (for icon generation)
-- Pencil MCP (for App Store screenshots)
-- Claude Code with this skill installed
+Run the checker to see what's missing:
+```bash
+bash ~/.claude/skills/mobileapp-builder/scripts/check-prerequisites.sh
+```
+
+For the complete step-by-step setup → **[SETUP.md](./SETUP.md)**
+
+**Summary of what you need:**
+
+| Category | Items |
+|----------|-------|
+| **Accounts** | Apple Developer ($99/yr), RevenueCat, Apify, X Developer, OpenAI, Slack |
+| **Env vars** | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `X_BEARER_TOKEN`, `APIFY_TOKEN`, `OPENAI_API_KEY`, `SLACK_BOT_TOKEN` + 6 more |
+| **CLI tools** | `asc`, `fastlane`, `greenlight`, `imagemagick`, `snapai`, `ios-deploy`, Python Pillow/PyJWT |
+| **MCP servers** | Pencil MCP (`@pencil-so/mcp`) + Maestro MCP (`@maestro-org/mcp-server`) in Claude Code |
+| **Sub-skills** | `x-research`, `tiktok-research`, `apify-trend-analysis`, `ralph-autonomous-dev`, `screenshot-creator`, `slack-approval` |
 
 ## Installation
 
@@ -47,11 +54,12 @@ npx skills add Daisuke134/mobileapp-builder -g -y
 
 ## Usage
 
-1. Create a `spec.md` (see `references/spec-template.md` for format)
-2. Run: **"Build and ship this app using mobileapp-builder"** in Claude Code
-3. Wait. The agent handles all 14 phases autonomously.
-
-For App Privacy (Phase 11.5), you'll be asked to set it manually in ASC Web — the API doesn't support it.
+1. Complete setup: follow **[SETUP.md](./SETUP.md)** and verify with `check-prerequisites.sh`
+2. In Claude Code, say: **"Build an iOS app about [your idea]"**
+3. The agent handles everything. You approve 3 times:
+   - **STOP 1**: Review the generated spec.md in Slack → approve or request changes
+   - **STOP 2**: Test the TestFlight build → approve or request fixes
+   - **STOP 3**: Set App Privacy in ASC Web (2 min) → say "done" → auto-submit
 
 ## Key Lessons Learned (Real-World Submissions)
 
@@ -69,13 +77,15 @@ For App Privacy (Phase 11.5), you'll be asked to set it manually in ASC Web — 
 
 ```
 mobileapp-builder/
-├── SKILL.md              ← Main skill (14 phases, 22 critical rules)
+├── SKILL.md              ← Main skill (14 phases, 22 critical rules, 3 human stops)
+├── SETUP.md              ← Complete setup guide (accounts, env vars, CLIs, MCPs)
 ├── references/
 │   ├── iap-bible.md      ← IAP pricing detailed guide
 │   ├── spec-template.md  ← spec.md format template
 │   └── submission-checklist.md ← Preflight gate checklist
 └── scripts/
-    └── add_prices.py     ← 175-territory IAP pricing script
+    ├── add_prices.py     ← 175-territory IAP pricing script
+    └── check-prerequisites.sh  ← Auto-check all prerequisites
 ```
 
 ## Philosophy

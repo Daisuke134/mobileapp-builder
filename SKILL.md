@@ -1,6 +1,6 @@
 ---
 name: mobileapp-builder
-description: Builds and ships a Swift/SwiftUI iOS app to the App Store from a spec.md file. Handles all 12 phases autonomously: Xcode scaffold → SwiftUI implementation → ASC subscription setup (175-territory pricing, localizations, review screenshots) → app assets → preflight gate → submission. Use when given a spec.md and told to build and ship an app, or when triggered by app-factory cron.
+description: Builds and ships a Swift/SwiftUI iOS app to the App Store from a natural language idea. Handles all phases autonomously: trend research (X + TikTok + App Store) → SDD spec → Xcode scaffold → SwiftUI implementation → landing page → ASC subscription setup → IAP 175-territory pricing → app icon + App Store screenshots → build → TestFlight → App Store submission. Three human stops: (1) spec approval before build, (2) TestFlight testing before submission, (3) App Privacy manual setup. Use when told to "build an app", "ship an iOS app", "make money with apps", or when triggered by app-factory cron.
 ---
 
 # mobileapp-builder
@@ -83,6 +83,20 @@ Free と Pro の実際の差分を確認してからコピーを書く。
 
 ## 14 PHASES
 
+### PHASE 0: PRE-FLIGHT（サブスキル確認）
+```bash
+# 必要なサブスキルが入っているか確認して、なければ install
+required_skills=(x-research tiktok-research apify-trend-analysis ralph-autonomous-dev screenshot-creator slack-approval)
+for skill in "${required_skills[@]}"; do
+  if ! npx skills list | grep -q "$skill"; then
+    npx skills add Daisuke134/anicca-products@$skill -g -y
+  fi
+done
+echo "✅ All sub-skills ready. Proceeding to trend research."
+```
+
+---
+
 ### PHASE 0: TREND RESEARCH
 ```
 x-research + tiktok-research + apify-trend-analysis スキルを並列実行
@@ -141,6 +155,20 @@ OUTPUT →
   .cursor/app-factory/{slug}/02-spec.md   ← PHASE 1 が読む
   .cursor/app-factory/{slug}/03-plan.md
   .cursor/app-factory/{slug}/04-tasks.md
+```
+
+---
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛑 STOP 1 — Spec 承認（PHASE 0.5 完了）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+slack-approval スキルで承認待ち:
+  title: "📋 App Spec 承認 — {app_name}"
+  body: spec.md の概要（app_name, concept, price, screens）
+  → ✅ 承認 → PHASE 1 に進む
+  → ❌ 拒否 → フィードバックを反映して PHASE 0 から再実行
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ### PHASE 1: VALIDATE INPUT
@@ -712,6 +740,24 @@ asc beta-groups list --app "<APP_ID>" | \
 # → "Successfully added 1 group(s)" が各グループ分出ればOK
 ```
 
+---
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛑 STOP 2 — TestFlight テスト（PHASE 10 完了）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TestFlight にビルドをプッシュ済み。テスターを招待してテストしてください:
+  1. TestFlight アプリから {app_name} を入手
+  2. 動作・Paywall・購入フローを確認
+  3. 問題なければ「OK」と入力 → PHASE 11 に進む
+     修正が必要な場合はフィードバックを入力 → PHASE 3 から再実行
+slack-approval スキルで承認待ち:
+  title: "🧪 TestFlight 確認 — {app_name} v{version}"
+  → ✅ 承認 → PHASE 11 に進む
+  → ❌ 拒否 → フィードバックを元に修正 → PHASE 3 から再実行
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
 ### PHASE 11: PREFLIGHT GATE
 ```bash
 # GATE 1: Greenlight
@@ -738,6 +784,18 @@ asc screenshots list --app "<APP_ID>" --locale ja | python3 -c "import sys,json;
 ```
 
 ### PHASE 11.5: APP PRIVACY 手動設定（PHASE 12 の前に必須 — API で設定不可）
+
+---
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛑 STOP 3 — App Privacy 手動設定（PHASE 11.5）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ASC API は App Privacy 設定に対応していない（404を返す）。
+ユーザーが ASC Web で手動設定する必要がある。
+下記の【ユーザー作業】を案内し、「完了」と言われたら PHASE 12 を即実行。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
 
 > **⚠️ 重要（2026-02-24 実機検証）: App Privacy は ASC API で設定できない**
 > `/v1/apps/{id}/appDataUsages` は 404 を返す。ユーザーが ASC Web で手動設定するまで先に進まない。
