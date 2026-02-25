@@ -28,6 +28,31 @@ See `references/spec-template.md` for the full spec.md format.
 
 ---
 
+## SELF-IMPROVEMENT RULE
+
+**失敗 → 即この SKILL.md に正しい CLI コマンドを書き込む → git push → 書き込み前に次フェーズへ進むのは禁止。**
+
+| トリガー | アクション |
+|---------|-----------|
+| Apple リジェクット | 原因分析 → 該当 PHASE に修正ルール追記 → git push |
+| CLI コマンドがエラー | 正しいコマンドを発見したら即 SKILL.md を修正 → git push |
+| 「手動が必要」と思った | まず `--help` で確認する。CLI にある可能性が高い。確認前に「手動」と言うのは禁止 |
+| 想定外のことが起きた | 修正せずに進むのは禁止。SKILL.md を直してから次へ |
+
+**書き方ルール（具体例 + CLI コマンド必須）:**
+```
+❌ 禁止: 「IAP は手動でASC Webから追加が必要」
+✅ 必須: 「`asc subscriptions submit --subscription-id <ID> --confirm` で CLI から直接 submit できる。
+         2026-02-25 実機確認済み（Thankful: 6759519847, 6759519935）」
+```
+
+**禁止:**
+- 確認せずに「手動が必要」と言う → 必ず `asc <subcommand> --help` で確認してから判断
+- 「次は気をつける」だけで終わらせる → 具体的な CLI コマンドを SKILL.md に追記すること
+- git push せずに進む → `git add -A && git commit && git push` まで完了させる
+
+---
+
 ## CRITICAL RULES (違反 = リジェクト確定)
 
 | # | ルール |
@@ -869,20 +894,59 @@ asc screenshots upload --app-id "<APP_ID>" --locale ja \
 
 #### Step 4: App Store メタデータ入力
 ```bash
-# EN メタデータ
-asc metadata update --app "<APP_ID>" --locale en-US \
-  --title "<metadata.title_en>" \
-  --subtitle "<metadata.subtitle_en>" \
-  --description "<metadata.description_en>" \
-  --keywords "<metadata.keywords_en>"
+# VERSION_ID を取得
+VERSION_ID=$(asc versions list --app "<APP_ID>" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
 
-# JA メタデータ（locale は必ず "ja"。"ja-JP" は無効）
-asc metadata update --app "<APP_ID>" --locale ja \
-  --title "<metadata.title_ja>" \
-  --subtitle "<metadata.subtitle_ja>" \
-  --description "<metadata.description_ja>" \
-  --keywords "<metadata.keywords_ja>"
+# localizations ディレクトリに .strings ファイルを作成
+mkdir -p /tmp/locs/en-US /tmp/locs/ja
+
+# EN metadata
+cat > /tmp/locs/en-US/description.txt << 'EOF'
+<metadata.description_en>
+
+Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+EOF
+
+cat > /tmp/locs/en-US/keywords.txt << 'EOF'
+<metadata.keywords_en>
+EOF
+
+cat > /tmp/locs/en-US/title.txt << 'EOF'
+<metadata.title_en>
+EOF
+
+cat > /tmp/locs/en-US/subtitle.txt << 'EOF'
+<metadata.subtitle_en>
+EOF
+
+# JA metadata（locale は "ja"。"ja-JP" は無効）
+cat > /tmp/locs/ja/description.txt << 'EOF'
+<metadata.description_ja>
+
+利用規約: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+EOF
+
+cat > /tmp/locs/ja/keywords.txt << 'EOF'
+<metadata.keywords_ja>
+EOF
+
+cat > /tmp/locs/ja/title.txt << 'EOF'
+<metadata.title_ja>
+EOF
+
+cat > /tmp/locs/ja/subtitle.txt << 'EOF'
+<metadata.subtitle_ja>
+EOF
+
+# upload（App Description に Terms URL が含まれる — Guideline 3.1.2 対応）
+asc localizations upload --version "$VERSION_ID" --path /tmp/locs
 ```
+
+**⚠️ Guideline 3.1.2（2026-02-25 実機確認）:**
+- App Description に Terms URL を必ず含める
+- アプリ内（Settings 画面）に Terms + Privacy リンクがあれば Paywall には不要
+- `asc localizations upload` で CLI から直接更新できる（手動不要）
 
 ### PHASE 10: BUILD & UPLOAD
 ```bash
@@ -945,6 +1009,25 @@ asc screenshots list --app "<APP_ID>" --locale ja | python3 -c "import sys,json;
 
 # GATE 1〜5 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
 ```
+
+### PHASE 11.6: IAP SUBMIT（Guideline 2.1 — CLI で全自動）
+
+**⚠️ 2026-02-25 実機確認: `asc subscriptions submit` コマンドで CLI から直接 submit できる（手動不要）。**
+
+```bash
+# Monthly と Annual を submit for review（両方必須）
+asc subscriptions submit --subscription-id "<MONTHLY_ID>" --confirm
+asc subscriptions submit --subscription-id "<ANNUAL_ID>" --confirm
+
+# 確認: 両方 WAITING_FOR_REVIEW になれば OK
+asc subscriptions get --id "<MONTHLY_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
+asc subscriptions get --id "<ANNUAL_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
+# → WAITING_FOR_REVIEW × 2 ✅
+```
+
+**WAITING_FOR_REVIEW でなければ STOP。PHASE 12 に進まない。**
+
+---
 
 ### PHASE 11.5: APP PRIVACY 手動設定（PHASE 12 の前に必須 — API で設定不可）
 
