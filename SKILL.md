@@ -75,7 +75,7 @@ See `references/spec-template.md` for the full spec.md format.
 | 16 | **Pencil 画像キャッシュ問題**。同じパスのファイルを上書きしても Pencil はキャッシュした旧版を使い続ける。画像差し替え時は**必ず新しいファイル名**を使うこと |
 | 17 | **`mcp__pencil__get_screenshot` はディスクに保存しない**。返ってくるのは MCP レスポンス内の base64 のみ。ASC アップロード用ファイルは別途シミュレータから `xcrun simctl io` で取得すること |
 | 18 | **App Privacy（データの使用方法）は ASC API で設定不可**。`/v1/apps/{id}/appDataUsages` は 404 を返す。PHASE 12 の前にユーザーに手動設定させること。設定手順は PHASE 11.5 参照 |
-| 19 | **ISSUER_ID は Fastfile の `API_ISSUER_ID` を使う**。間違った ID は全 curl 呼び出しが 401 を返す。正しい ID: `<YOUR_ISSUER_ID>`。ASC 画面の「キー ID」と混同しない |
+| 19 | **ISSUER_ID は ASC_ISSUER_ID 環境変数から取得**。間違った ID は全 curl 呼び出しが 401 を返す。ASC → Users and Access → Integrations → Keys 画面の上部に表示されている UUID が ISSUER_ID。キー一覧の「キー ID」欄の値（短い英数字）と混同しない |
 | 20 | **アイコンはビルド前に配置する**。ビルド後にアイコンを変更した場合は `CURRENT_PROJECT_VERSION` をバンプして再ビルドが必要。「The bundle version must be higher than the previously uploaded version」エラーが出たらバンプして再アップロード |
 | 21 | **Playwright + Chrome 競合**。Chrome 起動中に Playwright を実行すると「既存のブラウザセッションで開いています」エラー。先に `pkill -f "Google Chrome"` で Chrome を終了してから Playwright を起動 |
 | 22 | **`asc submit create --confirm` が正解の提出方法**。`PATCH reviewSubmissions.state` は 409 を返す。`asc review submissions-list` で確認できる ID は `appStoreVersionSubmissions` とは別物 |
@@ -189,17 +189,19 @@ check_env() {
   else echo "❌ $name → $link ($hint)"; ENV_FAIL=1; fi
 }
 
-check_env ASC_KEY_ID         "https://appstoreconnect.apple.com → Users and Access → Integrations → Keys" "キーID（例: <YOUR_KEY_ID>）"
-check_env ASC_ISSUER_ID      "同上"                                                                        "Issuer ID（UUID形式）"
-check_env ASC_KEY_PATH       "上記ページで .p8 ダウンロード → ~/Downloads/ に保存"                        "例: ~/Downloads/AuthKey_XXXXXX.p8"
-check_env REVENUECAT_API_KEY "https://app.revenuecat.com → Project Settings → API Keys"                   "sk_ で始まるキー"
-check_env MIXPANEL_TOKEN     "https://mixpanel.com → Project Settings → Project Token"                    "英数字トークン"
-check_env X_BEARER_TOKEN     "https://developer.twitter.com → App → Bearer Token"                        "AAAA... で始まる"
-check_env APIFY_TOKEN        "https://console.apify.com → Settings → Integrations"                       "apify_api_ で始まる"
-check_env OPENAI_API_KEY     "https://platform.openai.com → API keys"                                    "sk- で始まる"
-check_env SLACK_BOT_TOKEN    "https://api.slack.com/apps → OAuth & Permissions"                          "xoxb- で始まる"
-check_env SLACK_APP_TOKEN    "https://api.slack.com/apps → Basic Information → App-Level Tokens"         "xapp- で始まる"
-check_env SLACK_CHANNEL_ID   "Slack でチャンネル右クリック → リンクをコピー → 末尾 C... 部分"             "例: C0123456789"
+check_env ASC_KEY_ID              "https://appstoreconnect.apple.com → Users and Access → Integrations → Keys" "キーID（例: ABC123DEFG）"
+check_env ASC_ISSUER_ID           "同上"                                                                        "Issuer ID（UUID形式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）"
+check_env ASC_KEY_PATH            "上記ページで .p8 ダウンロード → ~/Downloads/ に保存（1度しかダウンロードできない）" "例: ~/Downloads/AuthKey_XXXXXX.p8"
+check_env REVENUECAT_API_KEY      "https://app.revenuecat.com → Project Settings → API Keys"                   "sk_ で始まるキー"
+check_env MIXPANEL_TOKEN          "https://mixpanel.com → Project Settings → Project Token"                    "英数字トークン"
+check_env X_BEARER_TOKEN          "https://developer.twitter.com → App → Bearer Token"                        "AAAA... で始まる"
+check_env APIFY_TOKEN             "https://console.apify.com → Settings → Integrations"                       "apify_api_ で始まる"
+check_env GEMINI_API_KEY          "https://console.cloud.google.com → APIs & Services → Credentials"           "AIza... で始まる"
+check_env OPENAI_API_KEY          "https://platform.openai.com → API keys"                                    "sk- で始まる"
+check_env SLACK_BOT_TOKEN         "https://api.slack.com/apps → OAuth & Permissions"                          "xoxb- で始まる"
+check_env SLACK_APP_TOKEN         "https://api.slack.com/apps → Basic Information → App-Level Tokens"         "xapp- で始まる"
+check_env SLACK_CHANNEL_ID        "Slack でチャンネル右クリック → リンクをコピー → 末尾 C... 部分"             "例: C0123456789"
+check_env PRIVACY_POLICY_DOMAIN   "自分が所有するドメイン（Privacy Policy と Landing Page をホストする）"       "例: example.com（https://は含めない）"
 
 if [ "$ENV_FAIL" -ne 0 ]; then
   echo ""
@@ -294,10 +296,10 @@ Step 1: spec.md の全フィールドを埋める（PHASE 1 の必須フィー�
   - price_monthly_usd: 9.99, price_annual_usd: 49.99（デフォルト）
   - paywall.cta_text_en / paywall.cta_text_ja
   - metadata: title_en/ja, subtitle_en/ja, description_en/ja, keywords_en/ja
-  - urls.privacy_en: "https://aniccaai.com/{slug}/privacy/en"
-  - urls.privacy_ja: "https://aniccaai.com/{slug}/privacy/ja"
+  - urls.privacy_en: "https://$PRIVACY_POLICY_DOMAIN/{slug}/privacy/en"
+  - urls.privacy_ja: "https://$PRIVACY_POLICY_DOMAIN/{slug}/privacy/ja"
   - urls.terms: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
-  - urls.landing: "https://aniccaai.com/{slug}"
+  - urls.landing: "https://$PRIVACY_POLICY_DOMAIN/{slug}"
   - localization: "os_language"
   - supported_locales: ["en", "ja"]
   - concept: （1行説明。スクショヘッドライン生成に使う）
@@ -370,10 +372,10 @@ spec.md の必須フィールド確認（全項目 MUST — 1つでも欠けれ�
   - metadata.keywords_en, metadata.keywords_ja
 
 ■ URL（アプリ専用 URL 必須 — 全アプリ共通 URL 禁止）
-  - urls.privacy_en   例: "https://aniccaai.com/thankful/privacy/en"
-  - urls.privacy_ja   例: "https://aniccaai.com/thankful/privacy/ja"
+  - urls.privacy_en   例: "https://example.com/myapp/privacy/en"（PRIVACY_POLICY_DOMAIN + slug で構成）
+  - urls.privacy_ja   例: "https://example.com/myapp/privacy/ja"
   - urls.terms        固定値: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
-  - urls.landing      例: "https://aniccaai.com/thankful"
+  - urls.landing      例: "https://example.com/myapp"
 
 ■ ローカライズ方針
   - localization: "os_language"  （日本語OS→日本語、その他→英語）
@@ -458,36 +460,61 @@ ralph-autonomous-dev で SwiftUI 実装
 
 ### PHASE 3.5: PRIVACY POLICY & LANDING PAGE デプロイ
 ```
-aniccaai.com/{slug}/ のページを作成して Netlify にデプロイする
-PHASE 4 の前に必須（URL が死んでいると ASC Privacy URL 設定が通らない）
+$PRIVACY_POLICY_DOMAIN/{slug}/ のページを作成してデプロイする。
+PHASE 4 の前に必須（URL が死んでいると ASC Privacy URL 設定が通らない）。
 
-■ 作成するページ（apps/landing/ に追加）
+■ 必要なページ（4つ）
 
-  1. aniccaai.com/{slug}/                    ← ランディングページ
-     - アプリ名・コンセプト・App Store リンク
-     - EN のみでよい（LP は英語）
+  1. https://$PRIVACY_POLICY_DOMAIN/{slug}/             ← ランディングページ
+     - アプリ名・コンセプト・App Store リンク（EN のみ可）
 
-  2. aniccaai.com/{slug}/privacy/en          ← Privacy Policy（英語）
-     - アプリ名・収集するデータ・用途を記載
-     - 既存 aniccaai.com/privacy を テンプレートとして流用し app_name を置換
+  2. https://$PRIVACY_POLICY_DOMAIN/{slug}/privacy/en  ← Privacy Policy（英語）
+     - 収集データ: Device ID（Analytics）、Usage Data（Analytics）
+     - RevenueCat: Purchase History（サブスク管理）
+     - 収集しないデータ: 日記内容・アファメーション（ローカル保存のみ）
 
-  3. aniccaai.com/{slug}/privacy/ja          ← Privacy Policy（日本語）
+  3. https://$PRIVACY_POLICY_DOMAIN/{slug}/privacy/ja  ← Privacy Policy（日本語）
      - 同上の日本語版
 
-  4. aniccaai.com/{slug}/terms               ← Terms of Use
-     - Apple 標準 EULA へリダイレクト
-     - URL: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+  4. https://$PRIVACY_POLICY_DOMAIN/{slug}/terms       ← Terms（EULA リダイレクト）
+     - https://www.apple.com/legal/internet-services/itunes/dev/stdeula/ へリダイレクト
 
-■ デプロイ手順
+■ 推奨デプロイ方法（3択 — 自分のインフラに合わせて選ぶ）
 
-  # 1. apps/landing/ にページファイルを作成（HTML or Markdown）
-  # 2. dev ブランチに push → Netlify が自動デプロイ
-  git add -A && git commit -m "feat: add {slug} landing + privacy pages" && git push origin dev
+  オプション A: GitHub Pages（無料・ドメイン持ちであれば最速）
+    1. リポジトリに docs/ フォルダを作成して HTML ファイルを追加
+    2. GitHub Settings → Pages → /docs を公開
+    3. カスタムドメインを設定 → $PRIVACY_POLICY_DOMAIN を向ける
 
-  # 3. URL が生きているか確認（PHASE 11 GATE 4 と同じチェック）
-  curl -I "https://aniccaai.com/{slug}/privacy/en" | grep "200\|301"
-  curl -I "https://aniccaai.com/{slug}/privacy/ja" | grep "200\|301"
-  # 200 or 301 でなければ STOP + Netlify のビルドログを確認
+  オプション B: Vercel / Netlify（Next.js や静的サイトがあれば）
+    1. プロジェクトに pages/{slug}/privacy/en.html 等を追加
+    2. push → 自動デプロイ
+
+  オプション C: 既存サーバー（VPS/Nginx/Apache）
+    1. /var/www/html/{slug}/ にファイルを配置
+    2. Nginx で location /{slug}/ { root /var/www/html; } を設定
+
+■ Privacy Policy の最小テンプレート（EN）
+
+  ```html
+  <!DOCTYPE html><html><body>
+  <h1>{app_name} Privacy Policy</h1>
+  <p>We collect: Device identifiers (for analytics), usage data.</p>
+  <p>We use RevenueCat for subscription management (purchase history).</p>
+  <p>We do NOT collect: journal entries, affirmations, or any personal content.</p>
+  <p>Contact: {your_email}</p>
+  </body></html>
+  ```
+
+■ デプロイ後の確認（必須 — URL が死んでいると PHASE 11 GATE 4 で STOP）
+
+  SLUG="{slug}"
+  DOMAIN="$PRIVACY_POLICY_DOMAIN"
+  curl -I "https://$DOMAIN/$SLUG/privacy/en" -s -o /dev/null -w "%{http_code}" | grep -q "200\|301\|302" \
+    && echo "✅ EN privacy URL 生きています" || echo "❌ STOP: EN privacy URL が死んでいます"
+  curl -I "https://$DOMAIN/$SLUG/privacy/ja" -s -o /dev/null -w "%{http_code}" | grep -q "200\|301\|302" \
+    && echo "✅ JA privacy URL 生きています" || echo "❌ STOP: JA privacy URL が死んでいます"
+  # 200/301/302 でなければ STOP。デプロイを確認してから PHASE 4 へ
 ```
 
 ### PHASE 4: ASC APP SETUP
@@ -501,21 +528,23 @@ APP_INFO_ID=$(asc apps info list --app "<APP_ID>" --output json | \
   python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
 
 TOKEN=$(python3 -c "
-import jwt,time,pathlib
-key=pathlib.Path.home().joinpath('Downloads/<AuthKey_XXXXXXXX.p8>').read_text()
-payload={'iss':'<YOUR_ISSUER_ID>','iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
-print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':'<YOUR_KEY_ID>','typ':'JWT'}))
+import jwt,time,os,pathlib
+key=pathlib.Path(os.environ['ASC_KEY_PATH']).read_text()
+payload={'iss':os.environ['ASC_ISSUER_ID'],'iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
+print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':os.environ['ASC_KEY_ID'],'typ':'JWT'}))
 ")
 
-# en-US Privacy URL
+# en-US Privacy URL（spec.md の urls.privacy_en を使う）
+PRIVACY_EN="<urls.privacy_en>"   # 例: https://example.com/myapp/privacy/en
 curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   "https://api.appstoreconnect.apple.com/v1/appInfoLocalizations/<EN_LOC_ID>" \
-  -d '{"data":{"type":"appInfoLocalizations","id":"<EN_LOC_ID>","attributes":{"privacyPolicyUrl":"https://aniccaai.com/privacy"}}}'
+  -d "{\"data\":{\"type\":\"appInfoLocalizations\",\"id\":\"<EN_LOC_ID>\",\"attributes\":{\"privacyPolicyUrl\":\"$PRIVACY_EN\"}}}"
 
-# ja Privacy URL（locale = "ja" 確認必須）
+# ja Privacy URL（locale = "ja" 確認必須 / spec.md の urls.privacy_ja を使う）
+PRIVACY_JA="<urls.privacy_ja>"   # 例: https://example.com/myapp/privacy/ja
 curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   "https://api.appstoreconnect.apple.com/v1/appInfoLocalizations/<JA_LOC_ID>" \
-  -d '{"data":{"type":"appInfoLocalizations","id":"<JA_LOC_ID>","attributes":{"privacyPolicyUrl":"https://aniccaai.com/privacy"}}}'
+  -d "{\"data\":{\"type\":\"appInfoLocalizations\",\"id\":\"<JA_LOC_ID>\",\"attributes\":{\"privacyPolicyUrl\":\"$PRIVACY_JA\"}}}"
 
 asc subscriptions groups create --app "<APP_ID>" --reference-name "Premium"
 
@@ -535,7 +564,7 @@ asc subscriptions availability set --id "<ANNUAL_ID>" \
 
 ### PHASE 4.5: RC OFFERINGS SETUP（TestFlight 前に必須）
 ```
-RC Dashboard → Thankful プロジェクト
+RC Dashboard → <app_name> プロジェクト（または新規作成）
   → Offerings → New Offering → identifier: "default"
   → Packages を追加:
       $rc_annual  → Apple Product ID: <bundle_id>.premium.yearly
@@ -545,14 +574,19 @@ RC Dashboard → Thankful プロジェクト
 確認: Offerings が "current" に設定されていること
 未設定 = TestFlight で「Apple IAP key is invalid」エラー
 
-IAP Key: <YOUR_IAP_KEY_ID>（同一 Apple Developer アカウントで全アプリ共通、新規作成不要）
-p8 file: ~/Downloads/<AuthKey_XXXXXXXX.p8> を RC にアップロード済みであること確認
+IAP Key: $ASC_KEY_ID（同一 Apple Developer アカウントで全アプリ共通、新規作成不要）
+p8 file: $ASC_KEY_PATH を RC にアップロード済みであること確認
+
+【RC プロジェクトが未作成の場合】
+RevenueCat Dashboard → Projects → New Project → App name を <app_name> に設定
+→ Add iOS App → Bundle ID: <bundle_id>
+→ App Store Connect App-Specific Shared Secret は ASC → My Apps → App Information から取得
 ```
 
 ### PHASE 5: IAP PRICING ★最重要
 ```bash
 # US 価格ポイント ID を取得してから scripts/add_prices.py を実行
-python3 .claude/skills/mobileapp-builder/scripts/add_prices.py \
+python3 ~/.claude/skills/mobileapp-builder/scripts/add_prices.py \
   --annual-sub "<ANNUAL_ID>" \
   --annual-pp "<ANNUAL_US_PP_ID>" \
   --monthly-sub "<MONTHLY_ID>" \

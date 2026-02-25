@@ -13,17 +13,18 @@ bash ~/.claude/skills/mobileapp-builder/scripts/check-prerequisites.sh
 
 Create these accounts before anything else (most are free):
 
-| # | Account | URL | Cost |
-|---|---------|-----|------|
-| 1 | **Apple Developer Program** | [developer.apple.com/enroll](https://developer.apple.com/enroll) | $99/year |
-| 2 | **App Store Connect API Key** | ASC → Users and Access → Integrations → Keys → + | Free |
-| 3 | **RevenueCat** | [app.revenuecat.com](https://app.revenuecat.com) | Free (up to $2.5k MRR) |
-| 4 | **Mixpanel** | [mixpanel.com/register](https://mixpanel.com/register) | Free (20M events/month) |
-| 5 | **X Developer Portal** | [developer.twitter.com](https://developer.twitter.com) | Free tier available |
-| 6 | **Apify** | [apify.com](https://apify.com) | Free ($5 credit included) |
-| 7 | **Google Cloud (Gemini API)** | [console.cloud.google.com](https://console.cloud.google.com) | Free tier available |
-| 8 | **OpenAI** | [platform.openai.com](https://platform.openai.com) | Pay-per-use |
-| 9 | **Slack workspace** | [slack.com](https://slack.com) | Free |
+| # | Account | URL | Cost | Wait |
+|---|---------|-----|------|------|
+| 1 | **Apple Developer Program** | [developer.apple.com/enroll](https://developer.apple.com/enroll) | $99/year | ⚠️ 24-48時間かかる場合あり。最初に申請すること |
+| 2 | **App Store Connect API Key** | ASC → Users and Access → Integrations → Keys → + | Free | ⚠️ .p8 は1度しかダウンロードできない。必ず安全な場所に保存 |
+| 3 | **RevenueCat** | [app.revenuecat.com](https://app.revenuecat.com) | Free (up to $2.5k MRR) | 即時 |
+| 4 | **Mixpanel** | [mixpanel.com/register](https://mixpanel.com/register) | Free (20M events/month) | 即時 |
+| 5 | **X Developer Portal** | [developer.twitter.com](https://developer.twitter.com) | Free tier available | 即時 |
+| 6 | **Apify** | [apify.com](https://apify.com) | Free ($5 credit included) | 即時 |
+| 7 | **Google Cloud (Gemini API)** | [console.cloud.google.com](https://console.cloud.google.com) | Free tier available | 即時 |
+| 8 | **OpenAI** | [platform.openai.com](https://platform.openai.com) | Pay-per-use | 即時 |
+| 9 | **Slack workspace** | [slack.com](https://slack.com) | Free | 即時 |
+| 10 | **ドメイン（Privacy Policy 用）** | 任意のレジストラ（Namecheap, Google Domains等） | ~$10/年 | 即時。ホスティング先も必要（GitHub Pages 等） |
 
 ---
 
@@ -75,6 +76,11 @@ SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 # The channel ID where you want approval notifications (right-click channel → Copy link)
 SLACK_CHANNEL_ID=C...
+
+# ── Privacy Policy Domain ────────────────────────────────────────────────
+# Your domain where Privacy Policy + Landing Page will be hosted
+# PHASE 3.5 will generate pages at: https://$PRIVACY_POLICY_DOMAIN/{slug}/privacy/en
+PRIVACY_POLICY_DOMAIN=yourdomain.com
 ```
 
 To load the env automatically, add to your `~/.zshrc` or `~/.bashrc`:
@@ -84,7 +90,21 @@ To load the env automatically, add to your `~/.zshrc` or `~/.bashrc`:
 
 ---
 
-## Section 3: CLI Tools
+## Section 3: Xcode（最初にインストール）
+
+**Xcode 16+ が必須。** インストールには 20〜40GB のディスクスペースと 30〜60分かかる。
+
+```bash
+# Mac App Store から Xcode をインストール（または xcode-select --install）
+# インストール後、必ず Command Line Tools も設定する:
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -runFirstLaunch  # 初回ライセンス承諾
+xcodebuild -version              # Xcode 16.x が表示されれば OK
+```
+
+---
+
+## Section 4: CLI Tools
 
 Install one by one:
 
@@ -121,7 +141,7 @@ bash ~/.claude/skills/mobileapp-builder/scripts/check-prerequisites.sh
 
 ---
 
-## Section 4: MCP Servers (Claude Code)
+## Section 5: MCP Servers (Claude Code)
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -146,7 +166,7 @@ After editing, **restart Claude Code**, then verify:
 
 ---
 
-## Section 5: Claude Code Sub-skills
+## Section 6: Claude Code Sub-skills
 
 Install all required skills:
 
@@ -171,22 +191,30 @@ npx skills list | grep -E "mobileapp-builder|x-research|tiktok-research|apify|ra
 
 ---
 
-## Section 6: Fastlane Configuration
+## Section 7: Fastlane Configuration
 
 Every app built by mobileapp-builder needs these variables in its `Fastfile`:
 
 ```ruby
 # Set these at the top of your Fastfile
-API_KEY_ID     = "<YOUR_KEY_ID>"          # Your ASC Key ID
-API_ISSUER_ID  = "<YOUR_ISSUER_ID>"  # Your Issuer ID
-API_KEY_PATH   = "#{ENV['HOME']}/Downloads/AuthKey_<YOUR_KEY_ID>.p8"
+API_KEY_ID     = ENV["ASC_KEY_ID"]      # from ~/.config/mobileapp-builder/.env
+API_ISSUER_ID  = ENV["ASC_ISSUER_ID"]  # from ~/.config/mobileapp-builder/.env
+API_KEY_PATH   = ENV["ASC_KEY_PATH"]   # from ~/.config/mobileapp-builder/.env
 ```
 
-The mobileapp-builder scaffold (PHASE 2) will auto-generate the Fastfile with these values if you have `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_PATH` set in your environment.
+The mobileapp-builder scaffold (PHASE 2) will auto-generate the Fastfile with these env vars if you have `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_PATH` set in your environment.
+
+**Fastlane Appfile（初回のみ設定）:**
+```ruby
+# aniccaios/fastlane/Appfile
+apple_id "your@email.com"           # Apple ID (Apple Developer Program のメアド)
+itc_team_id "XXXXXXXXXX"            # ASC → Users → Your name → Team ID で確認
+team_id "XXXXXXXXXX"                # Apple Developer Portal → Membership → Team ID
+```
 
 ---
 
-## Section 7: Slack App Setup (for approval notifications)
+## Section 8: Slack App Setup (for approval notifications)
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
 2. Name: `mobileapp-builder`, select your workspace
@@ -200,7 +228,7 @@ The mobileapp-builder scaffold (PHASE 2) will auto-generate the Fastfile with th
 
 ---
 
-## Section 8: Final Verification
+## Section 9: Final Verification
 
 Run the full check:
 ```bash
