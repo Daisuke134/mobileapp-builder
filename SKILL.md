@@ -79,6 +79,10 @@ See `references/spec-template.md` for the full spec.md format.
 | 20 | **アイコンはビルド前に配置する**。ビルド後にアイコンを変更した場合は `CURRENT_PROJECT_VERSION` をバンプして再ビルドが必要。「The bundle version must be higher than the previously uploaded version」エラーが出たらバンプして再アップロード |
 | 21 | **Playwright + Chrome 競合**。Chrome 起動中に Playwright を実行すると「既存のブラウザセッションで開いています」エラー。先に `pkill -f "Google Chrome"` で Chrome を終了してから Playwright を起動 |
 | 22 | **`asc submit create --confirm` が正解の提出方法**。`PATCH reviewSubmissions.state` は 409 を返す。`asc review submissions-list` で確認できる ID は `appStoreVersionSubmissions` とは別物 |
+| 23 | **RevenueCat delegate 名前衝突**。`SubscriptionManager.swift` の内部クラス名を `PurchasesDelegate` にすると同名プロトコルと衝突してビルドエラー。必ず `RCPurchasesDelegate: NSObject, PurchasesDelegate` と命名する（2026-02-26 実機確認済み） |
+| 24 | **iOS 15 ターゲット: `Locale.current.language.languageCode` 使用禁止**。iOS 16+ API。iOS 15 ターゲットでは `Locale.current.languageCode` を使う（deprecated だが iOS 15 互換）。2026-02-26 実機確認済み |
+| 25 | **iOS 15 ターゲット: `scrollContentBackground` 使用禁止**。iOS 16+ API。ZStack + Color で背景色を設定する workaround を使う。`Form` の背景を透明にしたい場合: `ZStack { Color(hex:"#0f0f1a").ignoresSafeArea(); Form { ... } }` |
+| 26 | **Fastfile シミュレータ destination は名前でなく UDID**。`"iPhone SE (3rd generation)"` は not found エラーになる。`xcrun simctl list devices available \| grep SE` で UDID を取得して `id=<UDID>` 形式で指定する |
 
 ---
 
@@ -91,6 +95,7 @@ See `references/spec-template.md` for the full spec.md format.
 | F3 | **クローズドループ強制** | 今日の失敗は明日の成功のソース。全ての例外・エラー・ハマりポイントを即座にこの SKILL.md に書き込め。 |
 | F4 | **オリジナル禁止** | 判断する前に既存ベストプラクティスを検索する。ソース引用なき判断行は削除。 |
 | F5 | **TDD 強制（PHASE 3）** | ralph-autonomous-dev は tdd-workflow スキルと組み合わせて使う。テストなし実装 = ビルドはできても品質がない。 |
+| F6 | **Worktree 必須** | 全作業は git worktree で隔離する。dev に直接コミットしない。TestFlight 承認後に dev にマージする。詳細は PHASE 0 PRE-FLIGHT STEP 0 参照。 |
 
 ---
 
@@ -125,6 +130,41 @@ Free と Pro の実際の差分を確認してからコピーを書く。
 PRE-FLIGHT はサイレントチェックではなくガイド付きウィザードとして実行する。
 問題が1つでも見つかれば、ユーザーに解決手順を提示し、確認を取ってから次の項目へ進む。
 全 STEP が PASS になるまで PHASE 0 TREND RESEARCH に進まない。
+
+---
+
+#### STEP 0: Git Worktree セットアップ（必須 — devを汚さない）
+
+**全作業は git worktree で dev から隔離する。dev に直接コミット禁止。**
+
+理由: 複数のファクトリーエージェントが同時に dev で作業すると競合が起きる。TestFlight テスト前のコードが dev に混入するとデプロイが汚れる。
+
+```bash
+# slug を spec.md から取得（例: breath-calm）
+SLUG=$(python3 -c "import re; s=open('.cursor/app-factory/<SLUG>/02-spec.md').read(); print(re.search(r'output_dir.*?([a-z-]+)-app', s).group(1))" 2>/dev/null || echo "<SLUG>")
+
+# worktree 作成（~/Downloads/ 直下）
+WORKTREE_PATH="$HOME/Downloads/anicca-${SLUG}"
+git worktree add "$WORKTREE_PATH" -b "app-factory/${SLUG}"
+echo "✅ Worktree 作成: $WORKTREE_PATH (branch: app-factory/${SLUG})"
+
+# 以降の全作業はこの worktree 内で行う
+cd "$WORKTREE_PATH"
+```
+
+**TestFlight 承認後のマージ手順（PHASE 10 完了後）:**
+
+```bash
+# 1. worktree から dev にマージ
+cd /Users/cbns03/Downloads/anicca-project  # メインリポジトリ
+git checkout dev
+git merge app-factory/${SLUG} --no-ff -m "feat(app-factory): merge ${SLUG} → dev (TestFlight approved)"
+git push origin dev
+
+# 2. worktree クリーンアップ
+git worktree remove "$HOME/Downloads/anicca-${SLUG}"
+git branch -d app-factory/${SLUG}
+```
 
 ---
 
