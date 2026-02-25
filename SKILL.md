@@ -558,9 +558,25 @@ PHASE 4 の前に必須（URL が死んでいると ASC Privacy URL 設定が通
 ```
 
 ### PHASE 4: ASC APP SETUP
+
+> **⚠️ アプリ作成は ASC Web で手動（API 作成不可 — 2026-02-26 実機確認）**
+>
+> ASC REST API の `/v1/apps` POST は 403 FORBIDDEN_ERROR を返す（"CREATE" not allowed）。
+> App Store Connect Web でのみ新規アプリを作成できる。
+>
+> **ユーザー作業（所要3分）:**
+> 1. https://appstoreconnect.apple.com → My Apps → `+` ボタン → 新しいApp
+> 2. プラットフォーム: iOS、名前: `<app_name>`、プライマリ言語: English (U.S.)
+> 3. バンドルID: `<bundle_id>`（事前に Apple Developer Portal で登録済みであること）
+> 4. SKU: `<bundle_id>` の最後のコンポーネント（例: `breathcalm`）
+> 5. アクセス: Full Access → 作成
+> 6. 作成後、URL に含まれる数字（例: `id6xxxxxxxxxx`）= APP_ID → エージェントに伝える
+>
+> APP_ID を受け取ったら以下を実行:
+
 ```bash
-asc apps create --bundle-id "<bundle_id>" --name "<app_name>" \
-  --primary-locale en-US --sku "<sku>"
+# ユーザーから APP_ID を受け取ったら実行
+APP_ID="<APP_ID>"  # 例: "6xxxxxxxxxx"
 
 # Privacy Policy URL を en-US AND ja 両方に設定（片方だけでは submit 時にエラー）
 # locale は必ず "ja"（"ja-JP" は ASC で無効）
