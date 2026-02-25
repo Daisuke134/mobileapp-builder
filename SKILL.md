@@ -57,6 +57,18 @@ See `references/spec-template.md` for the full spec.md format.
 
 ---
 
+## 🏭 工場ルール（FACTORY RULES — 違反 = ファクトリー停止）
+
+| # | ルール | 詳細 |
+|---|--------|------|
+| F1 | **承認待ち禁止** | フェーズ間で人間の承認を待つな。Slack に報告して即次フェーズへ。 |
+| F2 | **詰まったら SKILL.md を必ず修正** | エラー・失敗・想定外 → 修正して git commit/push → 次の実行で自動修正される。修正せずに進むのは禁止。 |
+| F3 | **クローズドループ強制** | 今日の失敗は明日の成功のソース。全ての例外・エラー・ハマりポイントを即座にこの SKILL.md に書き込め。 |
+| F4 | **オリジナル禁止** | 判断する前に既存ベストプラクティスを検索する。ソース引用なき判断行は削除。 |
+| F5 | **TDD 強制（PHASE 3）** | ralph-autonomous-dev は tdd-workflow スキルと組み合わせて使う。テストなし実装 = ビルドはできても品質がない。 |
+
+---
+
 ## ⚠️ Paywall コピー作成ルール（必読）
 
 **Paywall に書く機能は全てコードに実在すること。存在しない機能を訴求してはいけない。**
@@ -159,7 +171,6 @@ check_env REVENUECAT_API_KEY "https://app.revenuecat.com → Project Settings �
 check_env MIXPANEL_TOKEN     "https://mixpanel.com → Project Settings → Project Token"                    "英数字トークン"
 check_env X_BEARER_TOKEN     "https://developer.twitter.com → App → Bearer Token"                        "AAAA... で始まる"
 check_env APIFY_TOKEN        "https://console.apify.com → Settings → Integrations"                       "apify_api_ で始まる"
-check_env GEMINI_API_KEY     "https://console.cloud.google.com → APIs & Services → Credentials"           "AIza... で始まる"
 check_env OPENAI_API_KEY     "https://platform.openai.com → API keys"                                    "sk- で始まる"
 check_env SLACK_BOT_TOKEN    "https://api.slack.com/apps → OAuth & Permissions"                          "xoxb- で始まる"
 check_env SLACK_APP_TOKEN    "https://api.slack.com/apps → Basic Information → App-Level Tokens"         "xapp- で始まる"
@@ -240,6 +251,12 @@ OUTPUT → .cursor/app-factory/{slug}/01-trend.md
   - 決定したアプリアイデア（タイトル仮 + 一言説明）
   - 根拠（どのトレンドデータから判断したか）
   - slug（例: sleep-tracker、breath-calm 等）
+  - 【必須】なぜこれが人間の苦しみを解決するか: 実データ + ソースURL 付き3点
+    例: "不安障害は世界2.8億人（WHO: https://who.int/news-room/fact-sheets/detail/anxiety-disorders）"
+  - 【必須】なぜバイラルになるか（実測数値）: 各ツールの実測データを引用
+    例: "Apify実測: 9D Breathwork TikTok 動画 平均2.3M再生 / 月"
+    例: "Google Trends実測: 日本式ウォーキング 2,986% YoY増"
+    ※ LLM の推測 = 禁止。実ツール（Apify/X/Google Trends）の実数値のみ
 ```
 
 ### PHASE 0.5: SPEC 生成（SDD）
@@ -280,13 +297,33 @@ OUTPUT →
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🛑 STOP 1 — Spec 承認（PHASE 0.5 完了）
+📢 PHASE 0.5 完了 — Slack 報告して即 PHASE 1 へ
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-slack-approval スキルで承認待ち:
-  title: "📋 App Spec 承認 — {app_name}"
-  body: spec.md の概要（app_name, concept, price, screens）
-  → ✅ 承認 → PHASE 1 に進む
-  → ❌ 拒否 → フィードバックを反映して PHASE 0 から再実行
+⛔ 承認を待つな。Slack に投稿したら返信を待たずに即 PHASE 1 を開始する。
+
+Slack (#metrics / SLACK_CHANNEL_ID) に以下を投稿:
+
+🏭 {app_name} のビルドを開始します
+
+💊 なぜこれが人間の苦しみを解決するか:
+  [01-trend.md の「コアペイン」セクションから3点引用 — 実データ・ソースURL付き]
+  例: "不安障害は世界2.8億人（WHO）。薬なし6分で解決できる呼吸法は科学的証拠あり"
+
+📈 なぜバイラルになるか（実測データ）:
+  [x-research・tiktok-research・apify-trend-analysis の実測数値を3点引用]
+  例: "TikTok: 9D Breathwork が2026年明示的にバイラル（Apify実測）"
+  例: "日本式ウォーキング 2,986% YoY増（Google Trends実測）"
+  例: "日本市場 CAGR 16.31% → $822M by 2035（GlobeNewswire）"
+
+💰 {price_monthly_usd}/月 | {price_annual_usd}/年 | EN+JA
+
+📁 SDD ファイル（フルパス）:
+  .cursor/app-factory/{slug}/01-trend.md
+  .cursor/app-factory/{slug}/02-spec.md
+  .cursor/app-factory/{slug}/03-plan.md
+  .cursor/app-factory/{slug}/04-tasks.md
+
+Phase 1→12 を自律実行します。完了時に報告します。
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -334,6 +371,13 @@ mkdir -p <output_dir>/<app_name>ios
 
 ### PHASE 3: BUILD
 ```
+【TDD 強制】tdd-workflow スキルを起動してから ralph-autonomous-dev でループ実行。
+手順:
+  1. `tdd-workflow` スキルを読み込む（テストファースト実装の強制）
+  2. 各機能について RED → GREEN → REFACTOR を必ず通す
+  3. ralph-autonomous-dev が fix_plan.md を読み → 実装 → テスト → ✅ のループを回す
+  4. 全タスク `[x]` → EXIT_SIGNAL: true → PHASE 3 完了
+
 ralph-autonomous-dev で SwiftUI 実装
 
 ■ 必須実装（1つでも欠ければ PHASE 11 で STOP）
