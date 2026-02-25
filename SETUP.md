@@ -40,9 +40,9 @@ Then add to `~/.config/mobileapp-builder/.env`:
 ```bash
 # ── Apple / App Store Connect ────────────────────────────────────────
 # Get from: ASC → Users and Access → Integrations → Keys → +
-ASC_KEY_ID=D637C7RGFN
-ASC_ISSUER_ID=f53272d9-c12d-4d9d-811c-4eb658284e74
-ASC_KEY_PATH=~/Downloads/AuthKey_D637C7RGFN.p8   # downloaded .p8 file path
+ASC_KEY_ID=<YOUR_KEY_ID>
+ASC_ISSUER_ID=<YOUR_ISSUER_ID>
+ASC_KEY_PATH=~/Downloads/AuthKey_<YOUR_KEY_ID>.p8   # downloaded .p8 file path
 
 # ── RevenueCat ────────────────────────────────────────────────────────
 # Get from: RC Dashboard → Project Settings → API Keys → Secret Keys
@@ -177,9 +177,9 @@ Every app built by mobileapp-builder needs these variables in its `Fastfile`:
 
 ```ruby
 # Set these at the top of your Fastfile
-API_KEY_ID     = "D637C7RGFN"          # Your ASC Key ID
-API_ISSUER_ID  = "f53272d9-c12d-4d9d-811c-4eb658284e74"  # Your Issuer ID
-API_KEY_PATH   = "#{ENV['HOME']}/Downloads/AuthKey_D637C7RGFN.p8"
+API_KEY_ID     = "<YOUR_KEY_ID>"          # Your ASC Key ID
+API_ISSUER_ID  = "<YOUR_ISSUER_ID>"  # Your Issuer ID
+API_KEY_PATH   = "#{ENV['HOME']}/Downloads/AuthKey_<YOUR_KEY_ID>.p8"
 ```
 
 The mobileapp-builder scaffold (PHASE 2) will auto-generate the Fastfile with these values if you have `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_PATH` set in your environment.

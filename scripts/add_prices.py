@@ -4,10 +4,10 @@ add_prices.py — Equalization API で Monthly + Annual の175カ国価格を一
 
 使い方:
   python3 add_prices.py \
-    --annual-sub  "6759388949" \
-    --annual-pp   "eyJzIjoiNjc1OTM4ODk0OSIsInQiOiJVU0EiLCJwIjoiMTAxNzcifQ" \
-    --monthly-sub "6759389150" \
-    --monthly-pp  "eyJzIjoiNjc1OTM4OTE1MCIsInQiOiJVU0EiLCJwIjoiMTAwNjIifQ"
+    --annual-sub  "<YOUR_ANNUAL_SUB_ID>" \
+    --annual-pp   "<YOUR_ANNUAL_PP_ID>" \
+    --monthly-sub "<YOUR_MONTHLY_SUB_ID>" \
+    --monthly-pp  "<YOUR_MONTHLY_PP_ID>"
 
 価格ポイント ID の取得方法:
   asc subscriptions price-points list \

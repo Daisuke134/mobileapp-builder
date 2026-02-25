@@ -43,7 +43,7 @@ See `references/spec-template.md` for the full spec.md format.
 ```
 ❌ 禁止: 「IAP は手動でASC Webから追加が必要」
 ✅ 必須: 「`asc subscriptions submit --subscription-id <ID> --confirm` で CLI から直接 submit できる。
-         2026-02-25 実機確認済み（Thankful: 6759519847, 6759519935）」
+         2026-02-25 実機確認済み（実機確認済み。自分のサブスク ID は `asc subscriptions list --app <APP_ID>` で取得）」
 ```
 
 **禁止:**
@@ -66,7 +66,7 @@ See `references/spec-template.md` for the full spec.md format.
 | 7 | **Privacy Policy URL は en-US AND ja 両方必須**。片方だけでは submit 時にエラー |
 | 8 | **RC Offerings は TestFlight 前に設定必須**。未設定だと「Apple IAP key is invalid」エラーで課金不可 |
 | 9 | **locale は `ja`（`ja-JP` は無効）**。ASC API は `ja-JP` を拒否する |
-| 10 | **IAP key は同一 Apple Developer アカウントで使い回し**。新規作成不要。`AuthKey_AY9BT5R8NU.p8` を流用 |
+| 10 | **IAP key は同一 Apple Developer アカウントで使い回し**。新規作成不要。`<AuthKey_XXXXXXXX.p8>` を流用 |
 | 11 | **Paywall コピーは必ずコードから実機能を確認してから書く**。存在しない機能を訴求するのは罪（Apple レビュー違反 + ユーザー詐欺）。`FreePlanService.swift`, `SubscriptionManager.swift` を必ず読め |
 | 12 | **Mixpanel 必須**。全新規アプリに Mixpanel SDK を組み込み、`paywall_viewed`（`offering_id` プロパティ付き）を送信すること。Mixpanel なしでは paywall-ab スキルによる A/B 評価が不可能 |
 | 13 | **RevenueCat → Mixpanel 連携必須**。RC Dashboard で「Send data to Mixpanel」を有効化し、`presented_offering_id` が `rc_trial_started_event` に含まれることを確認すること。未設定 = A/B 変換追跡ゼロ |
@@ -75,7 +75,7 @@ See `references/spec-template.md` for the full spec.md format.
 | 16 | **Pencil 画像キャッシュ問題**。同じパスのファイルを上書きしても Pencil はキャッシュした旧版を使い続ける。画像差し替え時は**必ず新しいファイル名**を使うこと |
 | 17 | **`mcp__pencil__get_screenshot` はディスクに保存しない**。返ってくるのは MCP レスポンス内の base64 のみ。ASC アップロード用ファイルは別途シミュレータから `xcrun simctl io` で取得すること |
 | 18 | **App Privacy（データの使用方法）は ASC API で設定不可**。`/v1/apps/{id}/appDataUsages` は 404 を返す。PHASE 12 の前にユーザーに手動設定させること。設定手順は PHASE 11.5 参照 |
-| 19 | **ISSUER_ID は Fastfile の `API_ISSUER_ID` を使う**。間違った ID は全 curl 呼び出しが 401 を返す。正しい ID: `f53272d9-c12d-4d9d-811c-4eb658284e74`。ASC 画面の「キー ID」と混同しない |
+| 19 | **ISSUER_ID は Fastfile の `API_ISSUER_ID` を使う**。間違った ID は全 curl 呼び出しが 401 を返す。正しい ID: `<YOUR_ISSUER_ID>`。ASC 画面の「キー ID」と混同しない |
 | 20 | **アイコンはビルド前に配置する**。ビルド後にアイコンを変更した場合は `CURRENT_PROJECT_VERSION` をバンプして再ビルドが必要。「The bundle version must be higher than the previously uploaded version」エラーが出たらバンプして再アップロード |
 | 21 | **Playwright + Chrome 競合**。Chrome 起動中に Playwright を実行すると「既存のブラウザセッションで開いています」エラー。先に `pkill -f "Google Chrome"` で Chrome を終了してから Playwright を起動 |
 | 22 | **`asc submit create --confirm` が正解の提出方法**。`PATCH reviewSubmissions.state` は 409 を返す。`asc review submissions-list` で確認できる ID は `appStoreVersionSubmissions` とは別物 |
@@ -189,7 +189,7 @@ check_env() {
   else echo "❌ $name → $link ($hint)"; ENV_FAIL=1; fi
 }
 
-check_env ASC_KEY_ID         "https://appstoreconnect.apple.com → Users and Access → Integrations → Keys" "キーID（例: D637C7RGFN）"
+check_env ASC_KEY_ID         "https://appstoreconnect.apple.com → Users and Access → Integrations → Keys" "キーID（例: <YOUR_KEY_ID>）"
 check_env ASC_ISSUER_ID      "同上"                                                                        "Issuer ID（UUID形式）"
 check_env ASC_KEY_PATH       "上記ページで .p8 ダウンロード → ~/Downloads/ に保存"                        "例: ~/Downloads/AuthKey_XXXXXX.p8"
 check_env REVENUECAT_API_KEY "https://app.revenuecat.com → Project Settings → API Keys"                   "sk_ で始まるキー"
@@ -502,9 +502,9 @@ APP_INFO_ID=$(asc apps info list --app "<APP_ID>" --output json | \
 
 TOKEN=$(python3 -c "
 import jwt,time,pathlib
-key=pathlib.Path.home().joinpath('Downloads/AuthKey_D637C7RGFN.p8').read_text()
-payload={'iss':'f53272d9-c12d-4d9d-811c-4eb658284e74','iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
-print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':'D637C7RGFN','typ':'JWT'}))
+key=pathlib.Path.home().joinpath('Downloads/<AuthKey_XXXXXXXX.p8>').read_text()
+payload={'iss':'<YOUR_ISSUER_ID>','iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
+print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':'<YOUR_KEY_ID>','typ':'JWT'}))
 ")
 
 # en-US Privacy URL
@@ -545,8 +545,8 @@ RC Dashboard → Thankful プロジェクト
 確認: Offerings が "current" に設定されていること
 未設定 = TestFlight で「Apple IAP key is invalid」エラー
 
-IAP Key: AY9BT5R8NU（同一 Apple Developer アカウントで全アプリ共通、新規作成不要）
-p8 file: ~/Downloads/AuthKey_AY9BT5R8NU.p8 を RC にアップロード済みであること確認
+IAP Key: <YOUR_IAP_KEY_ID>（同一 Apple Developer アカウントで全アプリ共通、新規作成不要）
+p8 file: ~/Downloads/<AuthKey_XXXXXXXX.p8> を RC にアップロード済みであること確認
 ```
 
 ### PHASE 5: IAP PRICING ★最重要
