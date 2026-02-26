@@ -60,7 +60,7 @@ See `references/spec-template.md` for the full spec.md format.
 | 1 | **提出前に全サブスクが READY_TO_SUBMIT**。MISSING_METADATA のまま提出 → Guideline 2.1 拒否 |
 | 2 | **IAP pricing は全175カ国**。US のみは Guideline 2.1 拒否 |
 | 3 | **Superwall 使用禁止**。RevenueCat のみ |
-| 4 | **xcodebuild 直接実行禁止**。Fastlane のみ |
+| 4 | **ビルドは Fastlane gym のみ。ビルド後（upload/submit/metadata/screenshots）は ASC CLI のみ**。Fastlane の deliver/produce/pilot は禁止 |
 | 5 | **PHASE 8 が STOP ゲート**。blocking=0 + READY_TO_SUBMIT でなければ絶対に次に進まない |
 | 6 | **availability set は pricing の前**。順序を逆にすると全pricing call が Apple 500エラーで失敗する |
 | 7 | **Privacy Policy URL は en-US AND ja 両方必須**。片方だけでは submit 時にエラー |
@@ -559,20 +559,16 @@ PHASE 4 の前に必須（URL が死んでいると ASC Privacy URL 設定が通
 
 ### PHASE 4: ASC APP SETUP
 
-> **✅ アプリ作成は `fastlane produce create` で全自動（手動不要 — 2026-02-26 修正）**
+> **✅ アプリ作成は `asc apps create` + `asc bundle-ids create` で全自動（ASC CLI 0.34.0 — 2026-02-26 更新）**
 >
-> ASC REST API の `/v1/apps` POST は 403。asc CLI にも `create` サブコマンドなし。
-> 正解は `fastlane produce create` — App Store Connect + Apple Developer Portal 両方に自動登録。
+> fastlane produce は不要。ASC CLI 0.34.0 で `asc apps create` が追加された。
 
 ```bash
-# Step 1: fastlane produce create でアプリを自動作成
-FASTLANE_SKIP_UPDATE_CHECK=1 FASTLANE_OPT_OUT_CRASH_REPORTING=1 \
-fastlane produce create \
-  --app_name "<app_name>" \
-  --app_identifier "<bundle_id>" \
-  --sku "<slug>" \
-  --language "en-US"
-# → App Store Connect + Apple Developer Portal 両方にアプリが登録される
+# Step 0: Bundle ID を作成（Apple Developer Portal に登録）
+asc bundle-ids create --identifier "<bundle_id>" --name "<app_name>" --platform IOS
+
+# Step 1: asc apps create でアプリを作成（App Store Connect に登録）
+asc apps create --name "<app_name>" --bundle-id "<bundle_id>" --sku "<slug>" --primary-locale en-US
 
 # Step 2: 作成されたアプリの APP_ID を取得
 APP_ID=$(asc apps list --bundle-id "<bundle_id>" --output json | \
@@ -1042,17 +1038,27 @@ asc localizations upload --version "$VERSION_ID" --path /tmp/locs
 ### PHASE 10: BUILD & UPLOAD
 ```bash
 cd <output_dir>/<app_name>ios
-FASTLANE_SKIP_UPDATE_CHECK=1 fastlane set_version version:<version>
-FASTLANE_SKIP_UPDATE_CHECK=1 FASTLANE_OPT_OUT_CRASH_REPORTING=1 fastlane release
-# processingState = VALID になるまで待機
 
-# ★ 必須: TestFlight ベータグループに配布（この手順を省くとテスターがビルドを見れない）
-# ビルドIDを取得
-BUILD_ID=$(asc builds list --app "<APP_ID>" --sort -uploadedDate --limit 1 | \
+# Step 1: Fastlane gym でビルド + IPA 生成（gym = xcodebuild のラッパー。署名/export を自動処理）
+FASTLANE_SKIP_UPDATE_CHECK=1 fastlane set_version version:<version>
+FASTLANE_SKIP_UPDATE_CHECK=1 FASTLANE_OPT_OUT_CRASH_REPORTING=1 \
+  fastlane gym --scheme "<app_name>" --export_method app-store --output_directory ./build
+# → ./build/<app_name>.ipa が生成される
+
+# Step 2: ASC CLI でアップロード + バージョン作成（fastlane deliver/pilot は使わない）
+asc publish appstore \
+  --app "$APP_ID" \
+  --ipa "./build/<app_name>.ipa" \
+  --version "<version>" \
+  --wait \
+  --poll-interval 30s
+# → processingState = VALID になるまで自動待機
+
+# Step 3: TestFlight ベータグループに配布
+BUILD_ID=$(asc builds list --app "$APP_ID" --sort -uploadedDate --limit 1 --output json | \
   python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
 
-# 全ベータグループのIDを取得して追加
-asc beta-groups list --app "<APP_ID>" | \
+asc beta-groups list --app "$APP_ID" --output json | \
   python3 -c "import sys,json;d=json.load(sys.stdin);[print(g['id']) for g in d['data']]" | \
   xargs -I{} asc builds add-groups --build "$BUILD_ID" --group {}
 # → "Successfully added 1 group(s)" が各グループ分出ればOK
@@ -1084,21 +1090,27 @@ greenlight preflight <app_dir>  # CRITICAL = 0 でなければ STOP
 # GATE 2: IAP（D6-D10）
 # D6: prices 175件 / D7: screenshot 存在 / D8: en-US localization
 # D9: READY_TO_SUBMIT / D10: validate blocking=0
-asc validate subscriptions --app "<APP_ID>"
+asc validate subscriptions --app "$APP_ID"
 
-# GATE 3: コード品質チェック（自動）
+# GATE 3: ASC Validate（メタデータ/ビルド/価格/スクショ/年齢レーティングの API レベル検証 — ASC CLI 0.34.0 新機能）
+asc validate --app "$APP_ID" --version "<version>" --strict
+# → blocking issues があれば STOP。メタデータ長/必須フィールド/カテゴリ/ビルド添付/価格/スクショ互換性を検証
+asc validate iap --app "$APP_ID"
+# → IAP のレビュー準備状況を検証
+
+# GATE 4: コード品質チェック（自動）
 grep -r "Lorem\|lorem\|placeholder\|TODO\|FIXME" <app_dir>/Sources/ && echo "FAIL" || echo "PASS"
 
-# GATE 4: 外部リンク生死確認（自動）
+# GATE 5: 外部リンク生死確認（自動）
 curl -I "<urls.privacy_en>" -o /dev/null -s -w "%{http_code}" | grep -q "200\|301\|302" || echo "FAIL: privacy_en URL dead"
 curl -I "<urls.privacy_ja>" -o /dev/null -s -w "%{http_code}" | grep -q "200\|301\|302" || echo "FAIL: privacy_ja URL dead"
 curl -I "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/" -o /dev/null -s -w "%{http_code}" | grep -q "200" || echo "FAIL: EULA URL dead"
 
-# GATE 5: スクショ確認（自動）
-asc screenshots list --app "<APP_ID>" --locale en-US | python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS' if len(d['data'])>=3 else 'FAIL: EN screenshots <3')"
-asc screenshots list --app "<APP_ID>" --locale ja | python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS' if len(d['data'])>=3 else 'FAIL: JA screenshots <3')"
+# GATE 6: スクショ確認（自動）
+asc screenshots list --app "$APP_ID" --locale en-US | python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS' if len(d['data'])>=3 else 'FAIL: EN screenshots <3')"
+asc screenshots list --app "$APP_ID" --locale ja | python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS' if len(d['data'])>=3 else 'FAIL: JA screenshots <3')"
 
-# GATE 1〜5 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
+# GATE 1〜6 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
 ```
 
 ### PHASE 11.6: IAP SUBMIT（Guideline 2.1 — CLI で全自動）
@@ -1163,20 +1175,63 @@ ASC API は App Privacy 設定に対応していない（404を返す）。
 
 ### PHASE 12: SUBMIT
 ```bash
-VERSION_ID=$(asc versions list --app "<APP_ID>" | \
-  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+# ASC CLI 0.34.0: asc publish appstore が upload + version作成 + submit を全部やる
+# PHASE 10 で --wait のみ（--submit なし）で upload 済みの場合:
+asc publish appstore \
+  --app "$APP_ID" \
+  --ipa "./build/<app_name>.ipa" \
+  --version "<version>" \
+  --submit --confirm
+# → WAITING_FOR_REVIEW ✅
 
-BUILD_ID=$(asc builds list --app "<APP_ID>" --sort -uploadedDate --limit 1 | \
-  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+# 確認
+asc review submissions-list --app "$APP_ID"
+```
 
-asc submit create --app "<APP_ID>" \
-  --version-id "$VERSION_ID" --build "$BUILD_ID" --confirm
+### PHASE 13: REJECTION LOOP（ASC CLI 0.34.0 新機能 — EXPERIMENTAL）
+```bash
+# リジェクトされた場合の自動対応ループ
+# ⚠️ EXPERIMENTAL: Apple 非公式 API（/iris endpoints）を使用。壊れる可能性あり。
 
-# 確認: state = WAITING_FOR_REVIEW ✅
-asc review submissions-list --app "<APP_ID>"
+# Step 1: リジェクション理由を取得
+asc web review list --app "$APP_ID"
+# → submission ID を取得
+
+asc web review show --app "$APP_ID" --id "<SUBMISSION_ID>"
+# → リジェクション理由 + スレッド + メッセージ + スクショが自動DLされる
+
+# Step 2: 理由に基づいてコード/メタデータを修正
+# （修正内容はリジェクション理由による — ガイドライン番号で判断）
+
+# Step 3: 再ビルド → 再提出
+FASTLANE_SKIP_UPDATE_CHECK=1 FASTLANE_OPT_OUT_CRASH_REPORTING=1 \
+  fastlane gym --scheme "<app_name>" --export_method app-store --output_directory ./build
+
+asc publish appstore \
+  --app "$APP_ID" \
+  --ipa "./build/<app_name>.ipa" \
+  --version "<version>" \
+  --wait --submit --confirm
+
+# Step 4: このSKILL.mdにリジェクション原因と修正方法を記録 → git push
+# （SELF-IMPROVEMENT RULE に従う）
 ```
 
 ---
+
+## asc workflow（PHASE 9〜12 の一括実行 — オプション）
+
+リポジトリに `.asc/workflow.json` を配置すると、後半フェーズを1コマンドで実行できる:
+
+```bash
+# 提出前トリプルチェック
+APP_ID=<APP_ID> VERSION=<version> asc workflow run validate-only
+
+# メタデータ + スクショ + validate + publish を一括実行
+APP_ID=<APP_ID> VERSION=<version> IPA_PATH=./build/<app_name>.ipa asc workflow run ship
+```
+
+workflow.json テンプレート → `references/workflow-template.json`
 
 ## 参照ファイル
 
@@ -1185,4 +1240,5 @@ asc review submissions-list --app "<APP_ID>"
 | `references/iap-bible.md` | PHASE 4-8 の詳細手順・価格ポイント取得方法 |
 | `references/spec-template.md` | PHASE 1 の INPUT 確認 |
 | `references/submission-checklist.md` | PHASE 11 のゲートチェック全項目 |
+| `references/workflow-template.json` | asc workflow の定義テンプレート |
 | `scripts/add_prices.py` | PHASE 5 の価格設定実行 |

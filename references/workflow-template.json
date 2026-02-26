@@ -1,0 +1,89 @@
+{
+  "env": {
+    "APP_ID": "",
+    "VERSION": "",
+    "IPA_PATH": "",
+    "BUNDLE_ID": "",
+    "APP_NAME": "",
+    "SKU": "",
+    "VERSION_ID": "",
+    "EN_LOC_ID": "",
+    "JA_LOC_ID": ""
+  },
+  "before_all": "asc auth status",
+  "error": "echo '❌ Workflow failed. Check logs.'",
+  "workflows": {
+    "ship": {
+      "description": "Post-build: metadata → screenshots → validate → publish",
+      "steps": [
+        {
+          "name": "upload_metadata",
+          "command": "asc localizations upload --version $VERSION_ID --path ./metadata"
+        },
+        {
+          "name": "upload_screenshots_en",
+          "command": "asc screenshots upload --version-localization $EN_LOC_ID --path ./docs/screenshots/resized/en-US --device-type IPHONE_65"
+        },
+        {
+          "name": "upload_screenshots_ja",
+          "command": "asc screenshots upload --version-localization $JA_LOC_ID --path ./docs/screenshots/resized/ja --device-type IPHONE_65"
+        },
+        {
+          "name": "validate_app",
+          "command": "asc validate --app $APP_ID --version $VERSION --strict"
+        },
+        {
+          "name": "validate_subs",
+          "command": "asc validate subscriptions --app $APP_ID"
+        },
+        {
+          "name": "publish",
+          "command": "asc publish appstore --app $APP_ID --ipa $IPA_PATH --version $VERSION --wait --submit --confirm"
+        }
+      ]
+    },
+    "validate-only": {
+      "description": "Triple validation check (app + iap + subscriptions)",
+      "steps": [
+        {
+          "name": "validate_app",
+          "command": "asc validate --app $APP_ID --version $VERSION --strict"
+        },
+        {
+          "name": "validate_iap",
+          "command": "asc validate iap --app $APP_ID"
+        },
+        {
+          "name": "validate_subs",
+          "command": "asc validate subscriptions --app $APP_ID"
+        }
+      ]
+    },
+    "setup-new-app": {
+      "description": "Bundle ID + App creation (run before build)",
+      "steps": [
+        {
+          "name": "create_bundle_id",
+          "command": "asc bundle-ids create --identifier $BUNDLE_ID --name \"$APP_NAME\" --platform IOS"
+        },
+        {
+          "name": "create_app",
+          "command": "asc apps create --name \"$APP_NAME\" --bundle-id $BUNDLE_ID --sku $SKU --primary-locale en-US"
+        },
+        {
+          "name": "fetch_signing",
+          "command": "asc signing fetch --bundle-id $BUNDLE_ID --profile-type IOS_APP_STORE --output ./signing"
+        }
+      ]
+    },
+    "rejection-check": {
+      "description": "Check rejection reasons (EXPERIMENTAL)",
+      "steps": [
+        {
+          "name": "list_reviews",
+          "command": "asc web review list --app $APP_ID"
+        }
+      ]
+    }
+  }
+}
