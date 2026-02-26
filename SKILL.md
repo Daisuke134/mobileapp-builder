@@ -50,6 +50,9 @@ See `references/spec-template.md` for the full spec.md format.
 - 確認せずに「手動が必要」と言う → 必ず `asc <subcommand> --help` で確認してから判断
 - 「次は気をつける」だけで終わらせる → 具体的な CLI コマンドを SKILL.md に追記すること
 - git push せずに進む → `git add -A && git commit && git push` まで完了させる
+- セッション注入コンテキスト（`projectSettings:mobileapp-builder`）だけを信用する
+  → **必ず `Read` ツールで実ファイル（`/Users/cbns03/Downloads/mobileapp-builder/SKILL.md`）を確認する**
+  → セッション注入は古いキャッシュ版の可能性がある。実ファイルが SSOT。
 
 ---
 
@@ -555,6 +558,24 @@ PHASE 4 の前に必須（URL が死んでいると ASC Privacy URL 設定が通
   curl -I "https://$DOMAIN/$SLUG/privacy/ja" -s -o /dev/null -w "%{http_code}" | grep -q "200\|301\|302" \
     && echo "✅ JA privacy URL 生きています" || echo "❌ STOP: JA privacy URL が死んでいます"
   # 200/301/302 でなければ STOP。デプロイを確認してから PHASE 4 へ
+
+■ ⚠️ Netlify CI クラッシュ警告（F6違反時 — 2026-02-26 実機確認）
+
+  **F6ルール違反（worktree 未使用で main/dev に直接作業）すると Netlify CI が完全クラッシュする。**
+
+  原因: aniccaai.com の Next.js プロジェクトは `.worktrees/main/apps/landing/` にある。
+  worktree を使わず main ブランチや dev ブランチで作業すると、Netlify が
+  Next.js ビルドを実行できず CI が失敗する。
+
+  リカバリ手順（CI クラッシュ時）:
+  ```bash
+  cd /Users/cbns03/Downloads/anicca-project/.worktrees/main/apps/landing
+  next build
+  npx netlify deploy --dir=out --prod
+  # → 手動で本番デプロイして CI をバイパスする
+  ```
+
+  予防: **必ず F6 に従い `git worktree add ~/Downloads/anicca-{slug} -b app-factory/{slug}` で隔離すること。**
 ```
 
 ### PHASE 4: ASC APP SETUP
@@ -566,6 +587,10 @@ PHASE 4 の前に必須（URL が死んでいると ASC Privacy URL 設定が通
 
 ```bash
 # Step 1: fastlane produce create でアプリを自動作成
+# ⚠️ PRODUCE_USERNAME 必須（2026-02-26 実機確認）
+# API key 環境変数があっても Spaceship は Apple Developer Portal に
+# Apple ID ログインを使う。PRODUCE_USERNAME がないと "No value found for 'username'" エラー。
+PRODUCE_USERNAME="keiodaisuke@gmail.com" \
 FASTLANE_SKIP_UPDATE_CHECK=1 FASTLANE_OPT_OUT_CRASH_REPORTING=1 \
 fastlane produce create \
   --app_name "<app_name>" \
