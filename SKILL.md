@@ -86,6 +86,11 @@ See `references/spec-template.md` for the full spec.md format.
 | 24 | **iOS 15 ターゲット: `Locale.current.language.languageCode` 使用禁止**。iOS 16+ API。iOS 15 ターゲットでは `Locale.current.languageCode` を使う（deprecated だが iOS 15 互換）。2026-02-26 実機確認済み |
 | 25 | **iOS 15 ターゲット: `scrollContentBackground` 使用禁止**。iOS 16+ API。ZStack + Color で背景色を設定する workaround を使う。`Form` の背景を透明にしたい場合: `ZStack { Color(hex:"#0f0f1a").ignoresSafeArea(); Form { ... } }` |
 | 26 | **Fastfile シミュレータ destination は名前でなく UDID**。`"iPhone SE (3rd generation)"` は not found エラーになる。`xcrun simctl list devices available \| grep SE` で UDID を取得して `id=<UDID>` 形式で指定する |
+| 27 | **`asc apps create` は Apple ID + パスワード必須（API Key 不可）**。`asc apps create --apple-id <email> --password <pass>` が必要。パスワード不明時はユーザーに事前確認。`APPLE_ID_PASSWORD` を `.env` に事前設定しておくこと。2026-02-27 実機確認済み |
+| 28 | **ASC REST API `/v1/apps` POST は禁止操作**。`GET_COLLECTION, GET_INSTANCE, UPDATE` のみ許可。アプリ作成は必ず `asc apps create` を使う（Apple ID 必須）|
+| 29 | **Netlify は GitHub App Webhook なしで push に反応しない**。`aniccaai.com` は Netlify ホスト済みだが GitHub App Webhook がないため、push してもビルドされない。Netlify デプロイには `NETLIFY_AUTH_TOKEN` + `NETLIFY_SITE_ID` が必須。これらを `.env` および GitHub Secrets に必ず事前設定すること。2026-02-27 実機確認済み |
+| 30 | **アプリ作成前に必要なクレデンシャルを PHASE 0 で確認する**。`APPLE_ID_PASSWORD`（Apple ID パスワード）と `NETLIFY_AUTH_TOKEN` が PHASE 0 STEP 3 の ENV チェックに追加必須。これらなしに PHASE 3.5/4 は完了不可。|
+| 31 | **ImageMagick v7 では `convert` コマンドは非推奨**。`magick` コマンドを使う。`magick -size 1024x1024 gradient:... icon.png` が正解。|
 
 ---
 
@@ -245,6 +250,9 @@ check_env SLACK_BOT_TOKEN         "https://api.slack.com/apps → OAuth & Permis
 check_env SLACK_APP_TOKEN         "https://api.slack.com/apps → Basic Information → App-Level Tokens"         "xapp- で始まる"
 check_env SLACK_CHANNEL_ID        "Slack でチャンネル右クリック → リンクをコピー → 末尾 C... 部分"             "例: C0123456789"
 check_env PRIVACY_POLICY_DOMAIN   "自分が所有するドメイン（Privacy Policy と Landing Page をホストする）"       "例: example.com（https://は含めない）"
+check_env NETLIFY_AUTH_TOKEN      "https://app.netlify.com → User Settings → Applications → Personal access tokens → New access token" "tok_ で始まるトークン（PHASE 3.5 で必須）"
+check_env NETLIFY_SITE_ID         "https://app.netlify.com → サイト選択 → Site settings → General → Site ID" "UUID形式（PHASE 3.5 で必須）"
+check_env APPLE_ID_PASSWORD       "keiodaisuke@gmail.com の Apple ID パスワード"                             "PHASE 4 の asc apps create で必須"
 
 if [ "$ENV_FAIL" -ne 0 ]; then
   echo ""
