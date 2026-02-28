@@ -99,6 +99,8 @@ See `references/spec-template.md` for the full spec.md format.
 | 34 | **iPad スクショのサイズ: 2048×2732 が正解（2026-02-28 実機確認）**。Apple の `APP_IPAD_PRO_3GEN_129` display type は 2048×2732。`sips -z 2732 2048 input.png` で変換（`-z height width` の順序に注意）。2064×2752 は誤り |
 | 35 | **`primaryCategory` 未設定 → `INVALID_BINARY` になる（2026-02-28 実機確認）**。`asc submit create` 後に version が `INVALID_BINARY` になる主原因。PHASE 4 で必ず `appInfos` の `primaryCategory` relationship を設定する。コマンド: `curl -X PATCH /v1/appInfos/<ID>` で `relationships.primaryCategory.data.id = "UTILITIES"` 等を設定。確認: `curl /v1/appInfos/<ID>/primaryCategory` → id が返れば OK。`INVALID_BINARY` になってしまった場合の回復手順: `canceled: true` で既存提出をキャンセル → version 状態が `PREPARE_FOR_SUBMISSION` に戻る → `asc submit create` で再提出。2026-02-28 実機確認済み |
 | 36 | **`usesIdfa: None`（未設定）→ `INVALID_BINARY` になる（2026-02-28 実機確認）**。Apple の自動バイナリ検証が `usesIdfa` 未設定を検出して `INVALID_BINARY` に自動変換し、提出が UNRESOLVED_ISSUES+REJECTED になる。PHASE 9 Step 5（または PHASE 4）で必ず `usesIdfa: false` を設定する。コマンド: `curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID" -d '{"data":{"type":"appStoreVersions","id":"$VERSION_ID","attributes":{"usesIdfa":false}}}'`。設定後 `appStoreState` が即座に `INVALID_BINARY` → `READY_FOR_REVIEW` に回復する。`INVALID_BINARY` 回復手順: (1) 既存 UNRESOLVED_ISSUES 提出を `canceled: true` でキャンセル → (2) `usesIdfa: false` を PATCH → (3) 新規 reviewSubmission を作成 → (4) version item を追加 → (5) `submitted: true` で提出。2026-02-28 実機確認済み |
+| 37 | **Distribution 証明書が REVOKED → ITMS-90035: Invalid Signature（2026-02-28 実機確認）**。Keychain の Distribution 証明書が全て REVOKED になると、どのプロビジョニングプロファイルを使っても `error: exportArchive Signing certificate is invalid` が出る。**根本原因**: `openssl req` で CSR を作成しても Apple API が 409 で拒否する。**正解**: `asc certificates csr generate` → `asc certificates create --certificate-type IOS_DISTRIBUTION` の順で新証明書を発行。**回復手順**: (1) `asc certificates csr generate ~/Downloads/.signing/dist.csr` でCSR生成 → (2) `asc certificates create --certificate-type IOS_DISTRIBUTION --csr ~/Downloads/.signing/dist.csr` で証明書発行 → (3) ダウンロードした `.cer` と秘密鍵 `.pem` をKeychain にインポート → (4) REVOKED 証明書を Keychain から削除 → (5) `asc profiles create --profile-type IOS_APP_STORE` で新 Provisioning Profile 作成 → (6) Fastfile で `signingStyle: "manual"` + `provisioningProfiles: { "bundle.id" => "profile-uuid" }` を指定してビルド。REVOKED cert が embedded.mobileprovision に残ったまま Xcode 管理プロファイルを使い続けると何度やっても失敗する。2026-02-28 実機確認済み |
+| 38 | **`asc submit create` で `appStoreVersions already added to another reviewSubmission` エラー → キャンセルしてから新規作成（2026-02-28 実機確認）**。同じバージョンが既存の submission に紐付いている場合、新規 `submit create` が失敗する。**回復手順**: (1) `asc submit cancel --id <problematic-submission-id> --confirm` でキャンセル → (2) `asc submit create` を再実行。READY_FOR_REVIEW 状態の submission はキャンセル不可だが、UNRESOLVED_ISSUES や PREPARING は `canceled: true` でキャンセル可能。キャンセル後も新規 `asc submit create` を実行すれば、古い READY_FOR_REVIEW は無視して正しく新規提出が作られる。2026-02-28 実機確認済み |
 
 ---
 
@@ -1351,32 +1353,31 @@ curl -s -H "Authorization: Bearer $TOKEN_GATE" \
 # GATE 1〜11 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
 ```
 
-### PHASE 11.6: IAP SUBMIT（Guideline 2.1 — CLI で全自動）
+### PHASE 11.6: IAP 事前確認（Guideline 2.1）
 
-**⚠️ 2026-02-25 実機確認: `asc subscriptions submit` コマンドで CLI から直接 submit できる（手動不要）。**
+**🚨 CRITICAL（2026-02-28 実機確認）: `asc subscriptions submit` は初回提出で絶対に使うな。STATE_ERROR になる。**
 
-**🚨 初回アプリの重要制限（2026-02-28 実機確認）:**
+**IAP は READY_TO_SUBMIT のまま放置してよい。`asc submit create`（PHASE 12）を実行すると自動的に審査に含まれる。これが唯一の正解。**
 
-| 状態 | アクション |
-|------|-----------|
-| `state: READY_TO_SUBMIT` | `asc subscriptions submit` を実行 |
-| `state: STATE_ERROR` + `FIRST_SUBSCRIPTION_MUST_BE_SUBMITTED_ON_VERSION` | **スキップ**。`asc publish --submit` で App 本体と同時に提出される。別途 submit 不可 |
-| `state: MISSING_METADATA` | PHASE 5-7 に戻って IAP を完成させる |
+ソース: Apple 公式ドキュメント「For the first version of an app that includes in-app purchases, you must submit the in-app purchase product at the same time as you submit the version.」
+
+| コマンド | 結果 |
+|---------|------|
+| `asc subscriptions submit` | ❌ STATE_ERROR.FIRST_SUBSCRIPTION_MUST_BE_SUBMITTED_ON_VERSION |
+| `asc submit create --confirm`（PHASE 12） | ✅ READY_TO_SUBMIT の IAP が自動で含まれ WAITING_FOR_REVIEW |
 
 ```bash
-# まず state を確認してから submit するか判断する
+# READY_TO_SUBMIT であることを確認するだけ（submitコマンドは一切不要）
 asc subscriptions get --id "<MONTHLY_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
+# → READY_TO_SUBMIT ✅
+
 asc subscriptions get --id "<ANNUAL_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
+# → READY_TO_SUBMIT ✅
 
-# state が READY_TO_SUBMIT の場合のみ submit
-asc subscriptions submit --subscription-id "<MONTHLY_ID>" --confirm
-asc subscriptions submit --subscription-id "<ANNUAL_ID>" --confirm
-
-# state が STATE_ERROR(FIRST_SUBSCRIPTION_MUST_BE_SUBMITTED_ON_VERSION) の場合 → スキップして PHASE 11.5 へ
-# → PHASE 12 の asc publish --submit で App 本体と一緒に提出される
+# READY_TO_SUBMIT であれば → 即 PHASE 11.5 へ。asc subscriptions submit は絶対に実行しない。
 ```
 
-**WAITING_FOR_REVIEW または STATE_ERROR(FIRST_SUBSCRIPTION) でなければ STOP。PHASE 12 に進まない。**
+**READY_TO_SUBMIT でなければ STOP → PHASE 5-8 に戻る。**
 
 ---
 
@@ -1423,17 +1424,28 @@ ASC API は App Privacy 設定に対応していない（404を返す）。
 
 ### PHASE 12: SUBMIT
 ```bash
-# ASC CLI 0.34.0: asc publish appstore が upload + version作成 + submit を全部やる
-# PHASE 10 で --wait のみ（--submit なし）で upload 済みの場合:
-asc publish appstore \
+# ビルド済みの場合: asc submit create で提出（READY_TO_SUBMIT の IAP が自動的に含まれる）
+# 2026-02-28 実機確認: --build は必須フラグ
+
+BUILD_ID=$(asc builds list --app "$APP_ID" --sort -uploadedDate --limit 1 --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+
+VERSION_ID=$(asc versions list --app "$APP_ID" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+
+asc submit create \
   --app "$APP_ID" \
-  --ipa "./build/<app_name>.ipa" \
-  --version "<version>" \
-  --submit --confirm
-# → WAITING_FOR_REVIEW ✅
+  --version-id "$VERSION_ID" \
+  --build "$BUILD_ID" \
+  --confirm
+# → {"submissionId":"...","state":"WAITING_FOR_REVIEW"} ✅
+# → READY_TO_SUBMIT の IAP が自動的に審査に含まれる（Apple 公式仕様）
 
 # 確認
 asc review submissions-list --app "$APP_ID"
+# → state: WAITING_FOR_REVIEW ✅
+
+# ⚠️ asc publish appstore --submit も使えるが upload から全部やり直す（アップロード不要なら submit create が速い）
 ```
 
 ### PHASE 13: REJECTION LOOP（ASC CLI 0.34.0 新機能 — EXPERIMENTAL）
