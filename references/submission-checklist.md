@@ -37,6 +37,7 @@ mobileapp-builder PHASE 11 で実行する全項目。1件でも FAIL → STOP�
 
 | # | チェック項目 | コマンド |
 |---|------------|---------|
+| D0 | **`asc subscriptions submit` は使わない**。READY_TO_SUBMIT であることだけ確認する。提出は `asc submit create`（PHASE 12）で自動処理（2026-02-28 実機確認） | `asc subscriptions get --id <ID>` で state 確認のみ |
 | D1 | `asc validate subscriptions` blocking = 0 | `asc validate subscriptions --app <APP_ID>` |
 | D2 | Monthly: state = READY_TO_SUBMIT | `asc subscriptions get --id <MONTHLY_ID>` |
 | D3 | Annual: state = READY_TO_SUBMIT | `asc subscriptions get --id <ANNUAL_ID>` |

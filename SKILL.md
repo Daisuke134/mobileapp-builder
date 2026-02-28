@@ -159,12 +159,16 @@ PRE-FLIGHT はサイレントチェックではなくガイド付きウィザー
 
 ```bash
 # slug を spec.md から取得（例: breath-calm）
-SLUG=$(python3 -c "import re; s=open('.cursor/app-factory/<SLUG>/02-spec.md').read(); print(re.search(r'output_dir.*?([a-z-]+)-app', s).group(1))" 2>/dev/null || echo "<SLUG>")
+SLUG=$(python3 -c "import re; s=open('daily-apps/<SLUG>/spec/02-spec.md').read(); print(re.search(r'\*\*output_dir\*\*.*?daily-apps/([a-z-]+)', s).group(1))" 2>/dev/null || echo "<SLUG>")
 
-# worktree 作成（~/Downloads/ 直下）
+# worktree 作成（anicca-project 直下）
+WORKTREE_PATH="/Users/cbns03/Downloads/anicca-project/daily-apps/${SLUG}"
+# 注意: daily-apps/{slug}/ は既にコードが入っている可能性あり
+# worktree は anicca-project 外の一時ディレクトリに作成し、完成後に daily-apps/{slug}/ にマージする
 WORKTREE_PATH="$HOME/Downloads/anicca-${SLUG}"
 git worktree add "$WORKTREE_PATH" -b "app-factory/${SLUG}"
 echo "✅ Worktree 作成: $WORKTREE_PATH (branch: app-factory/${SLUG})"
+echo "📁 出力先: daily-apps/${SLUG}/ (worktree 内で作業し、TestFlight 承認後に dev にマージ)"
 
 # 以降の全作業はこの worktree 内で行う
 cd "$WORKTREE_PATH"
@@ -335,7 +339,7 @@ x-research + tiktok-research + apify-trend-analysis スキルを並列実行
   - 共通して出てくるテーマ = 今作るべきアプリのジャンル
   - アプリアイデアを1つに絞る（選択肢提示禁止。1つに決める）
 
-OUTPUT → .cursor/app-factory/{slug}/01-trend.md
+OUTPUT → daily-apps/{slug}/spec/01-trend.md
   - 決定したアプリアイデア（タイトル仮 + 一言説明）
   - 根拠（どのトレンドデータから判断したか）
   - slug（例: sleep-tracker、breath-calm 等）
@@ -376,9 +380,9 @@ Step 3: tasks.md を生成（実装タスクリスト）
   - PHASE 2〜12 の各フェーズに対応するタスクを網羅
 
 OUTPUT →
-  .cursor/app-factory/{slug}/02-spec.md   ← PHASE 1 が読む
-  .cursor/app-factory/{slug}/03-plan.md
-  .cursor/app-factory/{slug}/04-tasks.md
+  daily-apps/{slug}/spec/02-spec.md   ← PHASE 1 が読む
+  daily-apps/{slug}/spec/03-plan.md
+  daily-apps/{slug}/spec/04-tasks.md
 ```
 
 ---
@@ -406,10 +410,10 @@ Slack (#metrics / SLACK_CHANNEL_ID) に以下を投稿:
 💰 {price_monthly_usd}/月 | {price_annual_usd}/年 | EN+JA
 
 📁 SDD ファイル（フルパス）:
-  .cursor/app-factory/{slug}/01-trend.md
-  .cursor/app-factory/{slug}/02-spec.md
-  .cursor/app-factory/{slug}/03-plan.md
-  .cursor/app-factory/{slug}/04-tasks.md
+  daily-apps/{slug}/spec/01-trend.md
+  daily-apps/{slug}/spec/02-spec.md
+  daily-apps/{slug}/spec/03-plan.md
+  daily-apps/{slug}/spec/04-tasks.md
 
 Phase 1→12 を自律実行します。完了時に報告します。
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
