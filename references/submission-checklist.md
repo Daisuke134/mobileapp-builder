@@ -64,6 +64,8 @@ mobileapp-builder PHASE 11 で実行する全項目。1件でも FAIL → STOP�
 | E8 | **contentRightsDeclaration 設定済み（Submit 必須 — 2026-02-28 確認）** | `curl -H "Authorization: Bearer $TOKEN" https://api.appstoreconnect.apple.com/v1/appStoreVersions/<VERSION_ID> \| python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes'].get('contentRightsDeclaration','NOT SET'))"` |
 | E9 | **app pricing 設定済み（Submit 必須 — 2026-02-28 確認）** | `asc apps prices list --app <APP_ID>` → 1件以上 |
 | E10 | **App Privacy（データの使用方法）設定済み（ASC Web 手動）** | ASC Web → App Privacy が「編集済み」状態であること |
+| E11 | **usesIdfa 設定済み（INVALID_BINARY 防止 — 2026-02-28 確認）** | `curl -H "Authorization: Bearer $TOKEN" https://api.appstoreconnect.apple.com/v1/appStoreVersions/<VERSION_ID> \| python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes'].get('usesIdfa','NOT SET'))"` → `False` であること |
+| E12 | **primaryCategory 設定済み（INVALID_BINARY 防止 — 2026-02-28 確認）** | `curl -H "Authorization: Bearer $TOKEN" https://api.appstoreconnect.apple.com/v1/appInfos/<APP_INFO_ID>/primaryCategory` → id が返ること |
 
 ---
 
@@ -73,7 +75,7 @@ mobileapp-builder PHASE 11 で実行する全項目。1件でも FAIL → STOP�
 |---|------------|------|
 | F1 | 全 D チェック（D1-D9）が PASS した後に提出する | フェーズ順序を守る |
 | F2 | キャンセル→再提出ではなく初回提出 | MISSING_METADATA のまま提出していない |
-| F3 | GATE 1〜9 全て PASS（PHASE 11 参照） | copyright + content rights + pricing + iPad スクショ全確認 |
+| F3 | GATE 1〜11 全て PASS（PHASE 11 参照） | copyright + content rights + pricing + iPad スクショ + usesIdfa + primaryCategory 全確認 |
 
 ---
 
@@ -89,3 +91,5 @@ mobileapp-builder PHASE 11 で実行する全項目。1件でも FAIL → STOP�
 | App is not eligible for submission（copyright 未設定） | E7 | `asc versions update --copyright "2025 <Name>"` |
 | App is not eligible for submission（content rights 未設定） | E8 | curl PATCH で `contentRightsDeclaration: DOES_NOT_USE_THIRD_PARTY_CONTENT` |
 | App is not eligible for submission（pricing 未設定） | E9 | `appPriceSchedules` POST で無料または有料を設定 |
+| **INVALID_BINARY（usesIdfa 未設定）** | E11 | `curl PATCH /v1/appStoreVersions/<ID>` で `{"attributes":{"usesIdfa":false}}` を設定（PHASE 9 Step 6）|
+| **INVALID_BINARY（primaryCategory 未設定）** | E12 | `curl PATCH /v1/appInfos/<ID>` で `relationships.primaryCategory.data.id = "UTILITIES"` を設定（PHASE 4）|

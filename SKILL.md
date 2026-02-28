@@ -97,6 +97,8 @@ See `references/spec-template.md` for the full spec.md format.
 | 32 | **iPad 13" スクショ（APP_IPAD_PRO_3GEN_129）は Submit 必須（2026-02-28 実機確認）**。iPhone スクショだけでは `asc submit create` が失敗する。**正しいサイズ: 2048×2732**（2064×2752 は IMAGE_INCORRECT_DIMENSIONS エラー）。iPhone スクショを `sips -z 2732 2048` でリサイズして流用可。PHASE 9 Step 3b を参照 |
 | 33 | **copyright + contentRightsDeclaration + app pricing の3つは Submit 必須（2026-02-28 実機確認）**。いずれか未設定で `asc submit create` → `App is not eligible for submission` エラー。copyright は `asc versions update --copyright`、content rights は curl PATCH で `contentRightsDeclaration: DOES_NOT_USE_THIRD_PARTY_CONTENT`、pricing は `appPriceSchedules` POST で設定。PHASE 9 Step 5 を参照 |
 | 34 | **iPad スクショのサイズ: 2048×2732 が正解（2026-02-28 実機確認）**。Apple の `APP_IPAD_PRO_3GEN_129` display type は 2048×2732。`sips -z 2732 2048 input.png` で変換（`-z height width` の順序に注意）。2064×2752 は誤り |
+| 35 | **`primaryCategory` 未設定 → `INVALID_BINARY` になる（2026-02-28 実機確認）**。`asc submit create` 後に version が `INVALID_BINARY` になる主原因。PHASE 4 で必ず `appInfos` の `primaryCategory` relationship を設定する。コマンド: `curl -X PATCH /v1/appInfos/<ID>` で `relationships.primaryCategory.data.id = "UTILITIES"` 等を設定。確認: `curl /v1/appInfos/<ID>/primaryCategory` → id が返れば OK。`INVALID_BINARY` になってしまった場合の回復手順: `canceled: true` で既存提出をキャンセル → version 状態が `PREPARE_FOR_SUBMISSION` に戻る → `asc submit create` で再提出。2026-02-28 実機確認済み |
+| 36 | **`usesIdfa: None`（未設定）→ `INVALID_BINARY` になる（2026-02-28 実機確認）**。Apple の自動バイナリ検証が `usesIdfa` 未設定を検出して `INVALID_BINARY` に自動変換し、提出が UNRESOLVED_ISSUES+REJECTED になる。PHASE 9 Step 5（または PHASE 4）で必ず `usesIdfa: false` を設定する。コマンド: `curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID" -d '{"data":{"type":"appStoreVersions","id":"$VERSION_ID","attributes":{"usesIdfa":false}}}'`。設定後 `appStoreState` が即座に `INVALID_BINARY` → `READY_FOR_REVIEW` に回復する。`INVALID_BINARY` 回復手順: (1) 既存 UNRESOLVED_ISSUES 提出を `canceled: true` でキャンセル → (2) `usesIdfa: false` を PATCH → (3) 新規 reviewSubmission を作成 → (4) version item を追加 → (5) `submitted: true` で提出。2026-02-28 実機確認済み |
 
 ---
 
@@ -650,6 +652,23 @@ asc subscriptions availability set --id "<MONTHLY_ID>" \
 
 asc subscriptions availability set --id "<ANNUAL_ID>" \
   --available-in-new-territories --territory USA,JPN
+
+# ★★ primaryCategory 設定（CRITICAL RULE 35 — 未設定で INVALID_BINARY になる）
+APP_INFO_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.appstoreconnect.apple.com/v1/apps/<APP_ID>/appInfos" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
+
+# カテゴリ設定（アプリ内容に応じて変更: UTILITIES / PRODUCTIVITY / SOCIAL_NETWORKING / EDUCATION）
+curl -s -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "https://api.appstoreconnect.apple.com/v1/appInfos/$APP_INFO_ID" \
+  -d "{\"data\":{\"type\":\"appInfos\",\"id\":\"$APP_INFO_ID\",\"relationships\":{\"primaryCategory\":{\"data\":{\"type\":\"appCategories\",\"id\":\"UTILITIES\"}}}}}"
+
+# 確認（id が返れば OK）
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.appstoreconnect.apple.com/v1/appInfos/$APP_INFO_ID/primaryCategory" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print('primaryCategory:', d.get('data',{}).get('id','NOT SET'))"
 ```
 
 ### PHASE 4.5: RC OFFERINGS SETUP（TestFlight 前に必須）
@@ -1176,6 +1195,42 @@ curl -s -X POST \
   python3 -c "import sys,json;d=json.load(sys.stdin);print(json.dumps(d,ensure_ascii=False)[:200])"
 ```
 
+#### Step 6: usesIdfa 設定（CRITICAL — 未設定で INVALID_BINARY — 2026-02-28 実機確認）
+
+**⚠️ `usesIdfa: None`（未設定）のまま提出すると Apple の自動バイナリ検証で `INVALID_BINARY` になる。**
+**必ず Step 5 の直後に実行する。**
+
+```bash
+TOKEN=$(python3 -c "
+import jwt,time,os,pathlib
+key=pathlib.Path(os.path.expanduser(os.environ['ASC_KEY_PATH'])).read_text()
+payload={'iss':os.environ['ASC_ISSUER_ID'],'iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
+print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':os.environ['ASC_KEY_ID'],'typ':'JWT'}))
+")
+
+VERSION_ID=$(asc versions list --app "<APP_ID>" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+
+# usesIdfa を false に設定（IDFA を使わないアプリは false 固定）
+curl -s -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID" \
+  -d "{\"data\":{\"type\":\"appStoreVersions\",\"id\":\"$VERSION_ID\",\"attributes\":{\"usesIdfa\":false}}}" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print('usesIdfa:', d.get('data',{}).get('attributes',{}).get('usesIdfa','ERROR'))"
+# → usesIdfa: False ✅
+
+# 確認: appStoreState が READY_FOR_REVIEW になっていること
+asc versions get --version-id "$VERSION_ID" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['appStoreState'])"
+# → READY_FOR_SUBMISSION または PREPARE_FOR_SUBMISSION ✅（INVALID_BINARY でなければOK）
+```
+
+**注意:**
+- IDFA（IDentifier for Advertisers）を使うアプリは `usesIdfa: true` + 用途申告が必要
+- 通常のアプリ（RevenueCat + Mixpanel のみ）は `false` で問題ない
+- この設定は提出後に変更不可。変更が必要な場合は再ビルド・再提出が必要
+
 ### PHASE 10: BUILD & UPLOAD
 ```bash
 cd <output_dir>/<app_name>ios
@@ -1280,7 +1335,20 @@ curl -s -H "Authorization: Bearer $TOKEN_GATE" \
 asc apps prices list --app "$APP_ID" --output json | \
   python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS: pricing set' if d['data'] else 'FAIL: app pricing not set')"
 
-# GATE 1〜9 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
+# GATE 10: primaryCategory 確認（2026-02-28 実機確認 — 未設定で INVALID_BINARY になる）
+APP_INFO_ID_GATE=$(curl -s -H "Authorization: Bearer $TOKEN_GATE" \
+  "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/appInfos" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'][0]['id'])")
+curl -s -H "Authorization: Bearer $TOKEN_GATE" \
+  "https://api.appstoreconnect.apple.com/v1/appInfos/$APP_INFO_ID_GATE/primaryCategory" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);cat=d.get('data',{}).get('id','');print('PASS: primaryCategory=' + cat if cat else 'FAIL: primaryCategory not set → INVALID_BINARY になる')"
+
+# GATE 11: usesIdfa 確認（2026-02-28 実機確認 — 未設定で INVALID_BINARY になる）
+curl -s -H "Authorization: Bearer $TOKEN_GATE" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID_GATE" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);v=d['data']['attributes'].get('usesIdfa');print('PASS: usesIdfa=' + str(v) if v is not None else 'FAIL: usesIdfa not set → INVALID_BINARY になる。PHASE 9 Step 6 を実行してから再確認')"
+
+# GATE 1〜11 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
 ```
 
 ### PHASE 11.6: IAP SUBMIT（Guideline 2.1 — CLI で全自動）
