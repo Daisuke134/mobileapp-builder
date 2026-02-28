@@ -87,10 +87,16 @@ See `references/spec-template.md` for the full spec.md format.
 | 25 | **iOS 15 ターゲット: `scrollContentBackground` 使用禁止**。iOS 16+ API。ZStack + Color で背景色を設定する workaround を使う。`Form` の背景を透明にしたい場合: `ZStack { Color(hex:"#0f0f1a").ignoresSafeArea(); Form { ... } }` |
 | 26 | **Fastfile シミュレータ destination は名前でなく UDID**。`"iPhone SE (3rd generation)"` は not found エラーになる。`xcrun simctl list devices available \| grep SE` で UDID を取得して `id=<UDID>` 形式で指定する |
 | 27 | **`asc apps create` は Apple ID + パスワード必須（API Key 不可）**。`asc apps create --apple-id <email> --password <pass>` が必要。パスワード不明時はユーザーに事前確認。`APPLE_ID_PASSWORD` を `.env` に事前設定しておくこと。2026-02-27 実機確認済み |
+| 27b | **RC v1 `platform_product_identifier` は v2 product-package 変更で自動更新されない**。RC SDK v5 は v1 offerings API (`/v1/subscribers/{id}/offerings`) を使い、`platform_product_identifier` を StoreKit に渡す。v2 で products を attach しても v1 の値は変わらない。**修正手順**: (1) `DELETE /v2/projects/{project_id}/packages/{package_id}` でパッケージ削除（⚠️ offering path を含めると 404 — `/packages/{id}` のみ正しい）→ (2) `POST /offerings/{id}/packages` で再作成 → (3) `attach_products` で正しい product を attach → v1 API が正しい `platform_product_identifier` を返すようになる。2026-02-27 実機確認済み |
 | 28 | **ASC REST API `/v1/apps` POST は禁止操作**。`GET_COLLECTION, GET_INSTANCE, UPDATE` のみ許可。アプリ作成は必ず `asc apps create` を使う（Apple ID 必須）|
+| 28b | **RC v1 offerings API での platform_product_identifier 確認方法（診断必須）**。`curl -H "Authorization: Bearer <iOS_API_KEY>" https://api.revenuecat.com/v1/subscribers/\$RCAnonymousID:test/offerings -H "X-Platform: ios"` で `platform_product_identifier` を確認。ASC の Product ID（例: `com.bundle.premium.monthly`）と一致してなければ「プランの取得に失敗しました」エラーが出る。v2 ダッシュボードでは正しく見えていても v1 が古い値を返し続けることがある |
 | 29 | **Netlify は GitHub App Webhook なしで push に反応しない**。`aniccaai.com` は Netlify ホスト済みだが GitHub App Webhook がないため、push してもビルドされない。Netlify デプロイには `NETLIFY_AUTH_TOKEN` + `NETLIFY_SITE_ID` が必須。これらを `.env` および GitHub Secrets に必ず事前設定すること。2026-02-27 実機確認済み |
+| 29b | **初回 IAP は `asc subscriptions submit` で単独 submit 禁止**。`STATE_ERROR.FIRST_SUBSCRIPTION_MUST_BE_SUBMITTED_ON_VERSION` エラーが出る。これは Apple ルール: **初回 IAP は必ずアプリバージョンと同時提出**。PHASE 11.6 の `asc subscriptions submit` はスキップして、PHASE 12 で `asc publish appstore --submit --confirm` を実行すれば IAP も自動的に review に含まれる。2026-02-27 実機確認済み |
 | 30 | **アプリ作成前に必要なクレデンシャルを PHASE 0 で確認する**。`APPLE_ID_PASSWORD`（Apple ID パスワード）と `NETLIFY_AUTH_TOKEN` が PHASE 0 STEP 3 の ENV チェックに追加必須。これらなしに PHASE 3.5/4 は完了不可。|
 | 31 | **ImageMagick v7 では `convert` コマンドは非推奨**。`magick` コマンドを使う。`magick -size 1024x1024 gradient:... icon.png` が正解。|
+| 32 | **iPad 13" スクショ（APP_IPAD_PRO_3GEN_129）は Submit 必須（2026-02-28 実機確認）**。iPhone スクショだけでは `asc submit create` が失敗する。**正しいサイズ: 2048×2732**（2064×2752 は IMAGE_INCORRECT_DIMENSIONS エラー）。iPhone スクショを `sips -z 2732 2048` でリサイズして流用可。PHASE 9 Step 3b を参照 |
+| 33 | **copyright + contentRightsDeclaration + app pricing の3つは Submit 必須（2026-02-28 実機確認）**。いずれか未設定で `asc submit create` → `App is not eligible for submission` エラー。copyright は `asc versions update --copyright`、content rights は curl PATCH で `contentRightsDeclaration: DOES_NOT_USE_THIRD_PARTY_CONTENT`、pricing は `appPriceSchedules` POST で設定。PHASE 9 Step 5 を参照 |
+| 34 | **iPad スクショのサイズ: 2048×2732 が正解（2026-02-28 実機確認）**。Apple の `APP_IPAD_PRO_3GEN_129` display type は 2048×2732。`sips -z 2732 2048 input.png` で変換（`-z height width` の順序に注意）。2064×2752 は誤り |
 
 ---
 
@@ -1010,6 +1016,61 @@ asc screenshots upload --app-id "<APP_ID>" --locale ja \
 
 **注意:** `asc screenshots upload` は version localization（初回提出時）用。PPO Treatment localization に使う場合は `screenshot-ab` スキルの Step 7-3 を参照（Apple API 直接呼び出しが必要）。
 
+#### Step 3b: iPad 13" スクショアップロード（Submit に必須 — 2026-02-28 実機確認）
+
+**⚠️ iPad スクショなしでは `asc submit create` が失敗する。必ずアップロードする。**
+
+```bash
+# ⚠️ 正しいサイズ: 2048×2732（2064×2752 は IMAGE_INCORRECT_DIMENSIONS エラーで拒否される）
+TOKEN=$(python3 -c "
+import jwt,time,os,pathlib
+key=pathlib.Path(os.path.expanduser(os.environ['ASC_KEY_PATH'])).read_text()
+payload={'iss':os.environ['ASC_ISSUER_ID'],'iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
+print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':os.environ['ASC_KEY_ID'],'typ':'JWT'}))
+")
+
+VERSION_ID=$(asc versions list --app "<APP_ID>" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+
+EN_LOC_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID/appStoreVersionLocalizations" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);[print(x['id']) for x in d['data'] if x['attributes']['locale']=='en-US']")
+
+JA_LOC_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID/appStoreVersionLocalizations" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);[print(x['id']) for x in d['data'] if x['attributes']['locale']=='ja']")
+
+# iPhone 6.7" スクショを iPad サイズ（2048×2732）にリサイズ
+mkdir -p /tmp/ipad/en-US /tmp/ipad/ja
+
+for i in 1 2 3; do
+  sips -z 2732 2048 docs/screenshots/resized/en-US/screen${i}.png \
+    --out /tmp/ipad/en-US/screen${i}.png
+  sips -z 2732 2048 docs/screenshots/resized/ja/screen${i}.png \
+    --out /tmp/ipad/ja/screen${i}.png
+done
+
+# EN iPad アップロード
+asc screenshots upload \
+  --version-localization "$EN_LOC_ID" \
+  --display-type APP_IPAD_PRO_3GEN_129 \
+  --files /tmp/ipad/en-US/screen1.png \
+          /tmp/ipad/en-US/screen2.png \
+          /tmp/ipad/en-US/screen3.png
+
+# JA iPad アップロード
+asc screenshots upload \
+  --version-localization "$JA_LOC_ID" \
+  --display-type APP_IPAD_PRO_3GEN_129 \
+  --files /tmp/ipad/ja/screen1.png \
+          /tmp/ipad/ja/screen2.png \
+          /tmp/ipad/ja/screen3.png
+
+# 確認（3件 APP_IPAD_PRO_3GEN_129 が出ればOK）
+asc screenshots list --version-localization "$EN_LOC_ID" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);[print(x['attributes']['screenshotDisplayType']) for x in d['data']]"
+```
+
 #### Step 4: App Store メタデータ入力
 ```bash
 # VERSION_ID を取得
@@ -1065,6 +1126,55 @@ asc localizations upload --version "$VERSION_ID" --path /tmp/locs
 - App Description に Terms URL を必ず含める
 - アプリ内（Settings 画面）に Terms + Privacy リンクがあれば Paywall には不要
 - `asc localizations upload` で CLI から直接更新できる（手動不要）
+
+#### Step 5: copyright + content rights + app pricing 設定（Submit に必須 — 2026-02-28 実機確認）
+
+**⚠️ 3つ全て未設定だと `asc submit create` が `App is not eligible for submission` で失敗する。**
+
+```bash
+TOKEN=$(python3 -c "
+import jwt,time,os,pathlib
+key=pathlib.Path(os.path.expanduser(os.environ['ASC_KEY_PATH'])).read_text()
+payload={'iss':os.environ['ASC_ISSUER_ID'],'iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
+print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':os.environ['ASC_KEY_ID'],'typ':'JWT'}))
+")
+
+VERSION_ID=$(asc versions list --app "<APP_ID>" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+
+# 1. copyright（著作権）
+asc versions update --version-id "$VERSION_ID" --copyright "2025 <Your Name>"
+# 確認
+asc versions get --version-id "$VERSION_ID" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes'].get('copyright','NOT SET'))"
+
+# 2. content rights（コンテンツ配信権 — サードパーティコンテンツなし）
+curl -s -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID" \
+  -d "{\"data\":{\"type\":\"appStoreVersions\",\"id\":\"$VERSION_ID\",\"attributes\":{\"contentRightsDeclaration\":\"DOES_NOT_USE_THIRD_PARTY_CONTENT\"}}}" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('data',{}).get('attributes',{}).get('contentRightsDeclaration','ERROR'))"
+# → DOES_NOT_USE_THIRD_PARTY_CONTENT ✅
+
+# 3. app pricing（無料アプリの場合）
+# まず既存の価格設定を確認
+asc apps prices list --app "<APP_ID>" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print('設定済み:', len(d['data']), '件' if d['data'] else '未設定')"
+
+# 未設定（0件）の場合のみ実行
+FREE_PP_ID=$(curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "https://api.appstoreconnect.apple.com/v1/appPriceTiers/0/pricePoints?filter[territory]=USA" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "https://api.appstoreconnect.apple.com/v1/appPriceSchedules" \
+  -d "{\"data\":{\"type\":\"appPriceSchedules\",\"attributes\":{},\"relationships\":{\"app\":{\"data\":{\"type\":\"apps\",\"id\":\"<APP_ID>\"}},\"baseTerritory\":{\"data\":{\"type\":\"territories\",\"id\":\"USA\"}},\"manualPrices\":{\"data\":[{\"type\":\"appPrices\",\"id\":\"freePrice\"}]}},\"included\":[{\"type\":\"appPrices\",\"id\":\"freePrice\",\"attributes\":{\"customerPrice\":\"0\",\"proceeds\":\"0\"},\"relationships\":{\"appPricePoint\":{\"data\":{\"type\":\"appPricePoints\",\"id\":\"$FREE_PP_ID\"}}}}]}}" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(json.dumps(d,ensure_ascii=False)[:200])"
+```
 
 ### PHASE 10: BUILD & UPLOAD
 ```bash
@@ -1137,29 +1247,68 @@ curl -I "<urls.privacy_en>" -o /dev/null -s -w "%{http_code}" | grep -q "200\|30
 curl -I "<urls.privacy_ja>" -o /dev/null -s -w "%{http_code}" | grep -q "200\|301\|302" || echo "FAIL: privacy_ja URL dead"
 curl -I "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/" -o /dev/null -s -w "%{http_code}" | grep -q "200" || echo "FAIL: EULA URL dead"
 
-# GATE 6: スクショ確認（自動）
+# GATE 6: スクショ確認（iPhone 6.7" + iPad 13" 両方必須 — 2026-02-28 実機確認）
+VERSION_ID_GATE=$(asc versions list --app "$APP_ID" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'])")
+TOKEN_GATE=$(python3 -c "
+import jwt,time,os,pathlib
+key=pathlib.Path(os.path.expanduser(os.environ['ASC_KEY_PATH'])).read_text()
+payload={'iss':os.environ['ASC_ISSUER_ID'],'iat':int(time.time()),'exp':int(time.time())+1200,'aud':'appstoreconnect-v1'}
+print(jwt.encode(payload,key,algorithm='ES256',headers={'kid':os.environ['ASC_KEY_ID'],'typ':'JWT'}))
+")
+# iPhone 6.7" スクショ確認
 asc screenshots list --app "$APP_ID" --locale en-US | python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS' if len(d['data'])>=3 else 'FAIL: EN screenshots <3')"
 asc screenshots list --app "$APP_ID" --locale ja | python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS' if len(d['data'])>=3 else 'FAIL: JA screenshots <3')"
+# iPad 13" スクショ確認（APP_IPAD_PRO_3GEN_129）
+EN_LOC_ID_GATE=$(curl -s -H "Authorization: Bearer $TOKEN_GATE" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID_GATE/appStoreVersionLocalizations" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);[print(x['id']) for x in d['data'] if x['attributes']['locale']=='en-US']")
+curl -s -H "Authorization: Bearer $TOKEN_GATE" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/$EN_LOC_ID_GATE/appScreenshotSets" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);types=[x['attributes']['screenshotDisplayType'] for x in d['data']];print('PASS: iPad set exists' if 'APP_IPAD_PRO_3GEN_129' in types else 'FAIL: iPad 13\" screenshots missing')"
 
-# GATE 1〜6 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
+# GATE 7: copyright 確認（2026-02-28 実機確認）
+asc versions get --version-id "$VERSION_ID_GATE" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);v=d['data']['attributes'].get('copyright','');print('PASS: copyright set' if v else 'FAIL: copyright not set')"
+
+# GATE 8: content rights 確認（2026-02-28 実機確認）
+curl -s -H "Authorization: Bearer $TOKEN_GATE" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID_GATE" | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);v=d['data']['attributes'].get('contentRightsDeclaration','');print('PASS: content rights set' if v else 'FAIL: contentRightsDeclaration not set')"
+
+# GATE 9: app pricing 確認（2026-02-28 実機確認）
+asc apps prices list --app "$APP_ID" --output json | \
+  python3 -c "import sys,json;d=json.load(sys.stdin);print('PASS: pricing set' if d['data'] else 'FAIL: app pricing not set')"
+
+# GATE 1〜9 全て PASS でなければ STOP。1つでも FAIL → 修正して再実行
 ```
 
 ### PHASE 11.6: IAP SUBMIT（Guideline 2.1 — CLI で全自動）
 
 **⚠️ 2026-02-25 実機確認: `asc subscriptions submit` コマンドで CLI から直接 submit できる（手動不要）。**
 
+**🚨 初回アプリの重要制限（2026-02-28 実機確認）:**
+
+| 状態 | アクション |
+|------|-----------|
+| `state: READY_TO_SUBMIT` | `asc subscriptions submit` を実行 |
+| `state: STATE_ERROR` + `FIRST_SUBSCRIPTION_MUST_BE_SUBMITTED_ON_VERSION` | **スキップ**。`asc publish --submit` で App 本体と同時に提出される。別途 submit 不可 |
+| `state: MISSING_METADATA` | PHASE 5-7 に戻って IAP を完成させる |
+
 ```bash
-# Monthly と Annual を submit for review（両方必須）
+# まず state を確認してから submit するか判断する
+asc subscriptions get --id "<MONTHLY_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
+asc subscriptions get --id "<ANNUAL_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
+
+# state が READY_TO_SUBMIT の場合のみ submit
 asc subscriptions submit --subscription-id "<MONTHLY_ID>" --confirm
 asc subscriptions submit --subscription-id "<ANNUAL_ID>" --confirm
 
-# 確認: 両方 WAITING_FOR_REVIEW になれば OK
-asc subscriptions get --id "<MONTHLY_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
-asc subscriptions get --id "<ANNUAL_ID>" --output json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes']['state'])"
-# → WAITING_FOR_REVIEW × 2 ✅
+# state が STATE_ERROR(FIRST_SUBSCRIPTION_MUST_BE_SUBMITTED_ON_VERSION) の場合 → スキップして PHASE 11.5 へ
+# → PHASE 12 の asc publish --submit で App 本体と一緒に提出される
 ```
 
-**WAITING_FOR_REVIEW でなければ STOP。PHASE 12 に進まない。**
+**WAITING_FOR_REVIEW または STATE_ERROR(FIRST_SUBSCRIPTION) でなければ STOP。PHASE 12 に進まない。**
 
 ---
 
@@ -1225,11 +1374,14 @@ asc review submissions-list --app "$APP_ID"
 # ⚠️ EXPERIMENTAL: Apple 非公式 API（/iris endpoints）を使用。壊れる可能性あり。
 
 # Step 1: リジェクション理由を取得
+asc review details-get --app "$APP_ID"
+# → 審査詳細（理由・ガイドライン番号）を取得（v0.35.3 確認済み — 2026-02-28）
+
 asc web review list --app "$APP_ID"
-# → submission ID を取得
+# → submission ID を取得（EXPERIMENTAL）
 
 asc web review show --app "$APP_ID" --id "<SUBMISSION_ID>"
-# → リジェクション理由 + スレッド + メッセージ + スクショが自動DLされる
+# → リジェクション理由 + スレッド + メッセージ + スクショが自動DLされる（EXPERIMENTAL）
 
 # Step 2: 理由に基づいてコード/メタデータを修正
 # （修正内容はリジェクション理由による — ガイドライン番号で判断）

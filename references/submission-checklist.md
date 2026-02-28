@@ -56,9 +56,14 @@ mobileapp-builder PHASE 11 で実行する全項目。1件でも FAIL → STOP�
 | E1 | en-US タイトル・サブタイトル・説明文設定済み | `asc localizations list --version <VERSION_ID>` |
 | E2 | ja タイトル・サブタイトル・説明文設定済み | 同上 |
 | E3 | キーワード設定済み（en-US + ja） | 同上 |
-| E4 | App Store スクリーンショット 3枚（1290×2796） | ASC でスクショ確認 |
+| E4a | iPhone 6.7" スクリーンショット 3枚（1290×2796）EN + JA | `asc screenshots list --app <APP_ID> --locale en-US` |
+| E4b | **iPad 13" スクリーンショット 3枚（2048×2732）EN + JA（Submit 必須 — 2026-02-28 確認）** | version localization の appScreenshotSets で APP_IPAD_PRO_3GEN_129 を確認 |
 | E5 | アイコン（1024×1024）設定済み | Xcode プロジェクト内確認 |
 | E6 | Privacy Policy URL 設定済み | `asc app-infos list --app <APP_ID>` |
+| E7 | **copyright（著作権）設定済み（Submit 必須 — 2026-02-28 確認）** | `asc versions get --version-id <VERSION_ID> --output json \| python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes'].get('copyright','NOT SET'))"` |
+| E8 | **contentRightsDeclaration 設定済み（Submit 必須 — 2026-02-28 確認）** | `curl -H "Authorization: Bearer $TOKEN" https://api.appstoreconnect.apple.com/v1/appStoreVersions/<VERSION_ID> \| python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['attributes'].get('contentRightsDeclaration','NOT SET'))"` |
+| E9 | **app pricing 設定済み（Submit 必須 — 2026-02-28 確認）** | `asc apps prices list --app <APP_ID>` → 1件以上 |
+| E10 | **App Privacy（データの使用方法）設定済み（ASC Web 手動）** | ASC Web → App Privacy が「編集済み」状態であること |
 
 ---
 
@@ -68,6 +73,7 @@ mobileapp-builder PHASE 11 で実行する全項目。1件でも FAIL → STOP�
 |---|------------|------|
 | F1 | 全 D チェック（D1-D9）が PASS した後に提出する | フェーズ順序を守る |
 | F2 | キャンセル→再提出ではなく初回提出 | MISSING_METADATA のまま提出していない |
+| F3 | GATE 1〜9 全て PASS（PHASE 11 参照） | copyright + content rights + pricing + iPad スクショ全確認 |
 
 ---
 
@@ -79,3 +85,7 @@ mobileapp-builder PHASE 11 で実行する全項目。1件でも FAIL → STOP�
 | Guideline 5.1.1（Privacy Policy） | A3, E6 | Settings 画面に Privacy Policy リンク追加 |
 | Guideline 2.3.3（Metadata misrepresentation） | E1-E4 | スクショと実機能が一致しているか確認 |
 | PrivacyInfo.xcprivacy 不足 | A2 | Greenlight が検出するので CRITICAL=0 を確認 |
+| App is not eligible for submission（iPad スクショ未設定） | E4b | PHASE 9 Step 3b で APP_IPAD_PRO_3GEN_129 をアップロード |
+| App is not eligible for submission（copyright 未設定） | E7 | `asc versions update --copyright "2025 <Name>"` |
+| App is not eligible for submission（content rights 未設定） | E8 | curl PATCH で `contentRightsDeclaration: DOES_NOT_USE_THIRD_PARTY_CONTENT` |
+| App is not eligible for submission（pricing 未設定） | E9 | `appPriceSchedules` POST で無料または有料を設定 |
