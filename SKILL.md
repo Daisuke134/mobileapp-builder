@@ -101,6 +101,8 @@ See `references/spec-template.md` for the full spec.md format.
 | 36 | **`usesIdfa: None`（未設定）→ `INVALID_BINARY` になる（2026-02-28 実機確認）**。Apple の自動バイナリ検証が `usesIdfa` 未設定を検出して `INVALID_BINARY` に自動変換し、提出が UNRESOLVED_ISSUES+REJECTED になる。PHASE 9 Step 5（または PHASE 4）で必ず `usesIdfa: false` を設定する。コマンド: `curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "https://api.appstoreconnect.apple.com/v1/appStoreVersions/$VERSION_ID" -d '{"data":{"type":"appStoreVersions","id":"$VERSION_ID","attributes":{"usesIdfa":false}}}'`。設定後 `appStoreState` が即座に `INVALID_BINARY` → `READY_FOR_REVIEW` に回復する。`INVALID_BINARY` 回復手順: (1) 既存 UNRESOLVED_ISSUES 提出を `canceled: true` でキャンセル → (2) `usesIdfa: false` を PATCH → (3) 新規 reviewSubmission を作成 → (4) version item を追加 → (5) `submitted: true` で提出。2026-02-28 実機確認済み |
 | 37 | **Distribution 証明書が REVOKED → ITMS-90035: Invalid Signature（2026-02-28 実機確認）**。Keychain の Distribution 証明書が全て REVOKED になると、どのプロビジョニングプロファイルを使っても `error: exportArchive Signing certificate is invalid` が出る。**根本原因**: `openssl req` で CSR を作成しても Apple API が 409 で拒否する。**正解**: `asc certificates csr generate` → `asc certificates create --certificate-type IOS_DISTRIBUTION` の順で新証明書を発行。**回復手順**: (1) `asc certificates csr generate ~/Downloads/.signing/dist.csr` でCSR生成 → (2) `asc certificates create --certificate-type IOS_DISTRIBUTION --csr ~/Downloads/.signing/dist.csr` で証明書発行 → (3) ダウンロードした `.cer` と秘密鍵 `.pem` をKeychain にインポート → (4) REVOKED 証明書を Keychain から削除 → (5) `asc profiles create --profile-type IOS_APP_STORE` で新 Provisioning Profile 作成 → (6) Fastfile で `signingStyle: "manual"` + `provisioningProfiles: { "bundle.id" => "profile-uuid" }` を指定してビルド。REVOKED cert が embedded.mobileprovision に残ったまま Xcode 管理プロファイルを使い続けると何度やっても失敗する。2026-02-28 実機確認済み |
 | 38 | **`asc submit create` で `appStoreVersions already added to another reviewSubmission` エラー → キャンセルしてから新規作成（2026-02-28 実機確認）**。同じバージョンが既存の submission に紐付いている場合、新規 `submit create` が失敗する。**回復手順**: (1) `asc submit cancel --id <problematic-submission-id> --confirm` でキャンセル → (2) `asc submit create` を再実行。READY_FOR_REVIEW 状態の submission はキャンセル不可だが、UNRESOLVED_ISSUES や PREPARING は `canceled: true` でキャンセル可能。キャンセル後も新規 `asc submit create` を実行すれば、古い READY_FOR_REVIEW は無視して正しく新規提出が作られる。2026-02-28 実機確認済み |
+| 39 | **SnapAI が OpenAI 課金上限でエラーの場合 → ImageMagick で代替アイコン生成**。`snapai icon` が `400 Billing hard limit has been reached` で失敗した場合、ImageMagick `magick` で gradient + concentric circles の最小限アイコンを生成する。手順: `magick -size 1024x1024 gradient:"#COLOR1-#COLOR2" \( -size 1024x1024 xc:none -fill none -stroke "rgba(255,255,255,0.X)" -strokewidth N -draw "circle 512,512 512,R" \) -compose over -composite /tmp/icon.png`。App Store は透過背景 NG なので gradient 背景は必須。2026-02-28 実機確認済み |
+| 40 | **iOS 26.2 シミュレータで `xcrun simctl install` がハング（exit 149）する問題 → CoreSimulatorBridge 再起動で解決（2026-02-28 実機確認）**。症状: `simctl install` が無応答のまま終了しない（exit code 149）。原因: `installcoordinationd` が stale な `com.bundle.id_Invalid.plist` を保持している。**解決手順**: (1) `pkill -9 -f CoreSimulatorBridge` でブリッジ再起動 → (2) `simctl shutdown <UDID>` → `simctl boot <UDID>` でシミュレータ再起動 → (3) `~/Library/Developer/CoreSimulator/Devices/<UDID>/data/Containers/Coordinators/com.bundle.id_Invalid.plist` を削除 → (4) 再インストール成功。2026-02-28 実機確認済み |
 
 ---
 
@@ -602,18 +604,66 @@ PHASE 4 の前に必須（URL が死んでいると ASC Privacy URL 設定が通
 
 ### PHASE 4: ASC APP SETUP
 
-> **✅ アプリ作成は `asc apps create` + `asc bundle-ids create` で全自動（ASC CLI 0.34.0 — 2026-02-26 更新）**
->
-> fastlane produce は不要。ASC CLI 0.34.0 で `asc apps create` が追加された。
+#### Step 0: Bundle ID を作成（Apple Developer Portal に登録）
 
-# Step 0: Bundle ID を作成（Apple Developer Portal に登録）
+```bash
 asc bundle-ids create --identifier "<bundle_id>" --name "<app_name>" --platform IOS
+```
 
-# Step 1: asc apps create でアプリを作成（App Store Connect に登録）
+#### Step 0a: Playwright クッキー有効期限チェック
+
+```bash
+COOKIE_META=~/.asc/playwright-auth.json
+if [ -f "$COOKIE_META" ]; then
+  EXPIRES=$(python3 -c "import json;print(json.load(open('$COOKIE_META'))['expires_at'])")
+  NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [[ "$NOW" < "$EXPIRES" ]]; then
+    echo "✅ クッキー有効。Step 1 へ。"
+  else
+    echo "⚠️ クッキー期限切れ。Step 0b へ。"
+  fi
+else
+  echo "❌ クッキーなし。Step 0b へ。"
+fi
+```
+
+#### Step 0b: Playwright 再ログイン
+
+```bash
+node ~/.claude/skills/asc-app-create-ui/scripts/asc-login.js
+# → 2FA コード1回（system event で要求）
+# → ~/.asc/playwright-cookies.json 保存
+# → ~/.asc/playwright-auth.json 更新:
+#   {"last_login":"<now>","expires_at":"<now+28days>"}
+```
+
+#### Step 1: asc apps create（クッキー有効なら 2FA なし）
+
+```bash
 asc apps create --name "<app_name>" --bundle-id "<bundle_id>" --sku "<slug>" --primary-locale en-US
-# ⚠️ fastlane produce create は使わない（CRITICAL RULE 4 — 禁止）
-# 過去に試したが PRODUCE_USERNAME が必要で Spaceship が Apple ID ログインを要求する。
-# ASC CLI 0.34.0 で asc apps create が追加されたため fastlane produce は不要になった。
+```
+
+#### Step 1 失敗時フォールバック: Slack に手動作成依頼
+
+```
+system event → Slack:
+
+📱 ASC でアプリを手動作成してください（30秒）
+
+https://appstoreconnect.apple.com → + → 新規App
+
+コピペ情報:
+  プラットフォーム: iOS
+  名前: <app_name>
+  プライマリ言語: English (U.S.)
+  バンドルID: <bundle_id>
+  SKU: <slug>
+  ユーザアクセス: アクセス制限なし
+
+完了したら「完了」と送ってください。
+```
+
+⚠️ Playwright は未実装（2026-03-01）。実装されるまで Step 0a/0b をスキップしてフォールバック（Slack 手動作成依頼）を使う。
 
 # Step 2: 作成されたアプリの APP_ID を取得
 APP_ID=$(asc apps list --bundle-id "<bundle_id>" --output json | \
